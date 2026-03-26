@@ -37,12 +37,13 @@ export function solve(allPlayers: Player[], config: OptimizerConfig): LineupSlot
   const best: BestResult = { players: [], value: -1 };
 
   // Upper bound: sum of best candidate per remaining slot (optimistic)
-  function upperBound(slotIdx: number, usedIds: Set<string>, salary: number): number {
+  function upperBound(slotIdx: number, usedIds: Set<string>, salary: number, pitcherOppTeam: string): number {
     let bound = 0;
     for (let i = slotIdx; i < 9; i++) {
-      // Find best unused candidate that fits salary
       for (const c of candidates[i]) {
         if (!usedIds.has(c.id) && c.salary <= salary) {
+          // Skip batters facing our pitcher
+          if (i > 0 && pitcherOppTeam && c.team === pitcherOppTeam) continue;
           bound += getValue(c);
           salary -= c.salary;
           break;
@@ -86,7 +87,8 @@ export function solve(allPlayers: Player[], config: OptimizerConfig): LineupSlot
     }
 
     // Pruning: check if upper bound can beat best
-    const ub = currentValue + upperBound(slotIdx, usedIds, remainingSalary);
+    const pitcherOpp = chosen.length > 0 ? (chosen[0].opponent || '') : '';
+    const ub = currentValue + upperBound(slotIdx, usedIds, remainingSalary, pitcherOpp);
     if (ub <= best.value) return;
 
     // Min salary needed for remaining slots
@@ -102,6 +104,9 @@ export function solve(allPlayers: Player[], config: OptimizerConfig): LineupSlot
       // Team limit check
       const tc = teamCounts.get(player.team) || 0;
       if (tc >= MAX_PER_TEAM) continue;
+
+      // Don't pick batters who face our pitcher (opponent team = pitcher's opponent)
+      if (slotIdx > 0 && chosen[0]?.opponent && player.team === chosen[0].opponent) continue;
 
       // Place player
       usedIds.add(player.id);
