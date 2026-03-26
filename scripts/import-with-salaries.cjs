@@ -174,27 +174,27 @@ function calcB(p){
   // If we have zero tier data, projected=0 (don't fake it)
   if(!p.hit_odds&&!p.tb_2plus&&!p.rbi_odds&&!p.run_odds) return{projected:0,upside:0};
 
-  // === UPSIDE: interpolated 20% probability crossing point per stat ===
-  // Find the highest tier with >=20% prob, then interpolate between it and the next tier
-  // This gives smooth granularity: 28% on 4+ TB rates higher than 21% on 4+ TB
-  function upInterp(tiers){
+  // === UPSIDE: integer tier at 20% threshold + confidence bonus for tiebreaking ===
+  // Tier = highest count where P(X+) >= 20% (your "good game" scenario)
+  // Confidence bonus = how far above 20% you are, worth up to 30% of one extra unit
+  // This avoids inflating speed/discrete stats (SBs, runs) with fractional nonsense
+  function upTierConf(tiers,ptsPerUnit){
     const probs=tiers.filter(([,o])=>o).map(([k,o])=>[k,o2p(o)]);
-    if(!probs.length)return 0;
-    let bestK=0,bestP=0,nextP=0;
-    for(let i=0;i<probs.length;i++){
-      if(probs[i][1]>=0.20){bestK=probs[i][0];bestP=probs[i][1];nextP=i+1<probs.length?probs[i+1][1]:0;}
-    }
-    if(!bestK)return 0;
-    if(bestP>0.20&&nextP<0.20){return bestK+(bestP-0.20)/(bestP-nextP);}
-    return bestK;
+    if(!probs.length)return[0,0];
+    let bk=0,bp=0;
+    for(const[k,p]of probs){if(p>=0.20){bk=k;bp=p;}}
+    if(!bk)return[0,0];
+    const excess=Math.min((bp-0.20)/0.20,1);
+    return[bk,excess*ptsPerUnit*0.3];
   }
 
-  const upTB=upInterp([[1,p.hit_odds],[2,p.tb_2plus],[3,p.tb_3plus],[4,p.tb_4plus],[5,p.tb_5plus]]);
-  const upRBI=upInterp([[1,p.rbi_odds],[2,p.rbis_2plus],[3,p.rbis_3plus],[4,p.rbis_4plus]]);
-  const upRun=upInterp([[1,p.run_odds],[2,p.runs_2plus],[3,p.runs_3plus]]);
-  const upSB=upInterp([[1,p.sb_odds],[2,p.sbs_2plus]]);
+  const[upTB,tbB]=upTierConf([[1,p.hit_odds],[2,p.tb_2plus],[3,p.tb_3plus],[4,p.tb_4plus],[5,p.tb_5plus]],3);
+  const[upRBI,rbiB]=upTierConf([[1,p.rbi_odds],[2,p.rbis_2plus],[3,p.rbis_3plus],[4,p.rbis_4plus]],3.5);
+  const[upRun,runB]=upTierConf([[1,p.run_odds],[2,p.runs_2plus],[3,p.runs_3plus]],3.2);
+  const[upSB,sbB]=upTierConf([[1,p.sb_odds],[2,p.sbs_2plus]],6);
+  const confBonus=tbB+rbiB+runB+sbB;
 
-  let upside=upTB*3 + upRBI*3.5 + upRun*3.2 + expBB*3 + upSB*6;
+  let upside=upTB*3 + upRBI*3.5 + upRun*3.2 + expBB*3 + upSB*6 + confBonus;
 
   // HR scenario boost: a HR locks in 4TB+1R+1RBI simultaneously
   // Blend HR-scenario upside with independent-stat upside, weighted by HR probability
@@ -236,13 +236,13 @@ function calcP(p){
   const eIP=eo/3,eER=eIP*.4,wp=p.win_odds?o2p(p.win_odds):.45;
   const qp=eo>=18?.50:eo>=16?.35:eo>=14?.20:.10;
   const proj=ek*3+eo*1+eER*-3+wp*6+qp*4;
-  // Upside Ks: interpolated 20% probability crossing on alt K ladder
-  let uk=kl+1;
+  // Upside Ks: highest alt K tier with >=20% probability + confidence bonus
+  let uk=kl+1,kBonus=0;
   const kTiers=[[3,p.ks_alt_3plus],[4,p.ks_alt_4plus],[5,p.ks_alt_5plus],[6,p.ks_alt_6plus],[7,p.ks_alt_7plus],[8,p.ks_alt_8plus],[9,p.ks_alt_9plus],[10,p.ks_alt_10plus]];
   const kProbs=kTiers.filter(([,o])=>o).map(([k,o])=>[k,o2p(o)]);
-  if(kProbs.length){let bk=kl+1,bp=0,np=0;for(let i=0;i<kProbs.length;i++){if(kProbs[i][1]>=0.20){bk=kProbs[i][0];bp=kProbs[i][1];np=i+1<kProbs.length?kProbs[i+1][1]:0;}}if(bp>0.20&&np<0.20)uk=bk+(bp-0.20)/(bp-np);else uk=bk;}
+  if(kProbs.length){let bp=0;for(const[k,p2]of kProbs){if(p2>=0.20){uk=k;bp=p2;}}if(bp>0.20){const excess=Math.min((bp-0.20)/0.20,1);kBonus=excess*3*0.3;}}
   const uo=Math.min(ol+3,21),ue=Math.max(0,eER-1.5),uw=Math.min(1,wp+.15),uq=eIP>=4.5?Math.min(1,qp+.25):qp;
-  return{projected:Math.round(proj*10)/10,upside:Math.round((uk*3+uo*1+ue*-3+uw*6+uq*4)*10)/10};
+  return{projected:Math.round(proj*10)/10,upside:Math.round((uk*3+kBonus+uo*1+ue*-3+uw*6+uq*4)*10)/10};
 }
 
 async function main(){

@@ -285,25 +285,24 @@ function calcBatterPoints(p: Props): { projected: number; upside: number } {
 
   if (!p.hit_odds && !p.tb_2plus && !p.rbi_odds && !p.run_odds) return { projected: 0, upside: 0 };
 
-  // === UPSIDE: interpolated 20% probability crossing point per stat ===
-  function upInterp(tiers: [number, number | null][]): number {
+  // === UPSIDE: integer tier at 20% threshold + confidence bonus ===
+  function upTierConf(tiers: [number, number | null][], ptsPerUnit: number): [number, number] {
     const probs = tiers.filter(([, o]) => o).map(([k, o]) => [k, oddsToProb(o!)] as const);
-    if (!probs.length) return 0;
-    let bestK = 0, bestP = 0, nextP = 0;
-    for (let i = 0; i < probs.length; i++) {
-      if (probs[i][1] >= 0.20) { bestK = probs[i][0]; bestP = probs[i][1]; nextP = i + 1 < probs.length ? probs[i + 1][1] : 0; }
-    }
-    if (!bestK) return 0;
-    if (bestP > 0.20 && nextP < 0.20) { return bestK + (bestP - 0.20) / (bestP - nextP); }
-    return bestK;
+    if (!probs.length) return [0, 0];
+    let bk = 0, bp = 0;
+    for (const [k, p] of probs) { if (p >= 0.20) { bk = k; bp = p; } }
+    if (!bk) return [0, 0];
+    const excess = Math.min((bp - 0.20) / 0.20, 1);
+    return [bk, excess * ptsPerUnit * 0.3];
   }
 
-  const upTB = upInterp([[1, p.hit_odds], [2, p.tb_2plus], [3, p.tb_3plus], [4, p.tb_4plus], [5, p.tb_5plus]]);
-  const upRBI = upInterp([[1, p.rbi_odds], [2, p.rbis_2plus], [3, p.rbis_3plus], [4, p.rbis_4plus]]);
-  const upRun = upInterp([[1, p.run_odds], [2, p.runs_2plus], [3, p.runs_3plus]]);
-  const upSB = upInterp([[1, p.sb_odds], [2, p.sbs_2plus]]);
+  const [upTB, tbB] = upTierConf([[1, p.hit_odds], [2, p.tb_2plus], [3, p.tb_3plus], [4, p.tb_4plus], [5, p.tb_5plus]], 3);
+  const [upRBI, rbiB] = upTierConf([[1, p.rbi_odds], [2, p.rbis_2plus], [3, p.rbis_3plus], [4, p.rbis_4plus]], 3.5);
+  const [upRun, runB] = upTierConf([[1, p.run_odds], [2, p.runs_2plus], [3, p.runs_3plus]], 3.2);
+  const [upSB, sbB] = upTierConf([[1, p.sb_odds], [2, p.sbs_2plus]], 6);
+  const confBonus = tbB + rbiB + runB + sbB;
 
-  let upside = upTB * 3 + upRBI * 3.5 + upRun * 3.2 + expBB * 3 + upSB * 6;
+  let upside = upTB * 3 + upRBI * 3.5 + upRun * 3.2 + expBB * 3 + upSB * 6 + confBonus;
 
   // HR scenario boost: a HR locks in 4TB+1R+1RBI simultaneously
   if (p.hr_odds) {
@@ -369,7 +368,7 @@ function calcPitcherPoints(p: Props): { projected: number; upside: number } {
   const upsideWin = Math.min(1, winProb + 0.15);
   const upsideQS = expectedIP >= 4.5 ? Math.min(1, qsProb + 0.25) : qsProb;
 
-  const upside = upsideKs * 3 + upsideOuts * 1 + upsideER * -3 + upsideWin * 6 + upsideQS * 4;
+  const upside = upsideKs * 3 + kBonus + upsideOuts * 1 + upsideER * -3 + upsideWin * 6 + upsideQS * 4;
 
   return {
     projected: Math.round(projected * 10) / 10,
