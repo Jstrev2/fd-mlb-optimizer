@@ -80,14 +80,14 @@ async function scrapeRG(){
       if(m2&&line.length>3&&!line.match(/^\d/)&&!line.includes('O/U')&&!line.includes('$')&&!line.includes('%')&&!line.match(/^[A-Z]{2,}$/)){
         // Second pitcher in a game = switch to home team
         // (first pitcher is away, second is home)
-        const isAway=teamState==='awayPitcher'||teamState==='awayBatters';
+        // awayPitcher = this is the away pitcher
+        // awayBatters = we just finished away batters, so this is the HOME pitcher
+        const isAway=teamState==='awayPitcher';
         const team=isAway?currentAway:currentHome;
         const opp=isAway?currentHome:currentAway;
         players.push({name:line,position:'P',salary:Math.round(parseFloat(m2[1])*1000),team,opponent:opp});
-        // After away pitcher, batters follow. After 2nd pitcher (home), home batters follow.
         if(teamState==='awayPitcher')teamState='awayBatters';
-        else if(teamState==='awayBatters')teamState='homeBatters'; // 2nd pitcher = home
-        else if(teamState==='homePitcher')teamState='homeBatters';
+        else teamState='homeBatters';
         i++;continue;
       }
     }
