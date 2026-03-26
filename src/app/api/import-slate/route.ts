@@ -254,17 +254,19 @@ async function getDFFPlayers(): Promise<DFFPlayer[]> {
     headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
   });
   const html = await res.text();
-  const text = html
+  // Strip HTML tags, decode entities, normalize to clean lines
+  const rawText = html
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
     .replace(/<[^>]+>/g, "\n")
-    .replace(/&amp;/g, "&").replace(/&#39;/g, "'").replace(/&quot;/g, '"')
-    .replace(/\n{3,}/g, "\n\n");
+    .replace(/&amp;/g, "&").replace(/&#39;/g, "'").replace(/&quot;/g, '"');
+  const textLines = rawText.split("\n").map((l: string) => l.trim()).filter((l: string) => l);
+  const text = textLines.join("\n");
 
   const players: DFFPlayer[] = [];
 
-  // Pitcher regex
-  const pitcherRegex = /(?:^|\n)\s*P\s*\n\s*([\w][\w\s.'-]+?)\s*(?:DTD\s*)?•\s*\([LRS]\)\s*\n\s*\$([\d.]+)k\s*\n\s*(?:YES|EXP\.)\s*\n\s*(\w{2,3})\s*\n\s*(\w{2,3})\s*\n\s*([\d.]+)/gm;
+  // Pitcher regex - $ may be separate line from amount
+  const pitcherRegex = /(?:^|\n)P\n([\w][\w\s.'-]+?)\s*(?:DTD\s*)?\n\u2022\s*\([LRS]\)\n\$\n?([\d.]+)k\n(?:YES|EXP\.)\n(\w{2,3})\n(\w{2,3})\n([\d.]+)/gm;
   let match;
   while ((match = pitcherRegex.exec(text)) !== null) {
     players.push({
@@ -274,17 +276,15 @@ async function getDFFPlayers(): Promise<DFFPlayer[]> {
     });
   }
 
-  // Batter regex
-  const batterRegex = /(?:^|\n)\s*(C(?:\/OF)?|1B(?:\/1B)?|2B(?:\/(?:SS|OF|2B))?|3B(?:\/(?:2B|3B))?|SS(?:\/SS)?|OF(?:\/OF)?)\s*\n\s*([\w][\w\s.'-]+?)\s*(?:DTD\s*)?•\s*\([LRS]\)\s*\n\s*\$([\d.]+)k\s*\n\s*(?:YES|EXP\.)\s*\n\s*(\w{2,3})\s*\n\s*(\w{2,3})\s*\n\s*\d+\s*(?:✓)?\s*\n\s*([\d.]+)/gm;
+  // Batter regex - handles multi-position and $ on separate line
+  const batterRegex = /(?:^|\n)(C(?:\/OF)?|1B(?:\/1B)?|2B(?:\/(?:SS|OF|2B))?|3B(?:\/(?:2B|3B))?|SS(?:\/SS)?|OF(?:\/OF)?)\n([\w][\w\s.'-]+?)\s*(?:DTD\s*)?\n\u2022\s*\([LRS]\)\n\$\n?([\d.]+)k\n(?:YES|EXP\.)\n(\w{2,3})\n(\w{2,3})\n(\d+)\s*(?:\u2713)?\n([\d.]+)/gm;
   while ((match = batterRegex.exec(text)) !== null) {
     players.push({
       name: match[2].trim(), position: match[1].split("/")[0],
       salary: Math.round(parseFloat(match[3]) * 1000),
-      team: match[4], dff_projected: parseFloat(match[6]) || 0,
+      team: match[4], dff_projected: parseFloat(match[7]) || 0,
     });
-  }
-
-  return players;
+  }  return players;
 }
 
 // Name matching helper - normalize names for fuzzy matching
