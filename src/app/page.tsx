@@ -67,12 +67,17 @@ export default function PlayersPage() {
         </div>
       </div>
 
-      {/* Import / Clear controls */}
+      {/* Controls */}
       <div className="flex gap-2 mb-4">
+        <button onClick={() => { setLoading(true); fetchPlayers(); }}
+          className="flex-1 py-2.5 bg-gradient-to-r from-emerald-500/20 to-teal-500/20 border border-emerald-500/30 rounded-xl text-sm font-bold text-emerald-400 hover:border-emerald-500/60 transition-all flex items-center justify-center gap-2">
+          <Download size={16} />
+          🔄 Refresh Players
+        </button>
         <button onClick={loadSlate} disabled={importing}
-          className="flex-1 py-2.5 bg-gradient-to-r from-blue-500/20 to-purple-500/20 border border-blue-500/30 rounded-xl text-sm font-bold text-blue-400 hover:border-blue-500/60 transition-all flex items-center justify-center gap-2 disabled:opacity-50">
-          {importing ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-          {importing ? "Loading Slate..." : "📥 Load Today's FanDuel Slate"}
+          className="px-3 py-2.5 bg-gradient-to-r from-blue-500/20 to-purple-500/20 border border-blue-500/30 rounded-xl text-xs font-bold text-blue-400 hover:border-blue-500/60 transition-all flex items-center justify-center gap-2 disabled:opacity-50">
+          {importing ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+          {importing ? "..." : "Re-scrape"}
         </button>
         {players.length > 0 && (
           <button onClick={clearAll} className="px-3 py-2.5 text-xs text-red-400 border border-red-500/30 rounded-xl hover:bg-red-500/10">Clear</button>
