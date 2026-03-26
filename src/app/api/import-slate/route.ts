@@ -351,7 +351,7 @@ function calcPitcherPoints(p: Props): { projected: number; upside: number } {
   // Upside: ~90th percentile start. Great pitcher day = 50-70 FD pts.
   // Use alt K tiers to find realistic ceiling Ks.
   // Upside Ks: interpolated 20% probability crossing on alt K ladder
-  let upsideKs = ksLine + 1;
+  let upsideKs = ksLine + 1, kBonus = 0;
   const kTiers: [number, number|null][] = [[3,p.ks_alt_3plus],[4,p.ks_alt_4plus],[5,p.ks_alt_5plus],[6,p.ks_alt_6plus],[7,p.ks_alt_7plus],[8,p.ks_alt_8plus],[9,p.ks_alt_9plus],[10,p.ks_alt_10plus]];
   const kProbs = kTiers.filter(([,o]) => o).map(([k, o]) => [k, oddsToProb(o!)] as const);
   if (kProbs.length) {
