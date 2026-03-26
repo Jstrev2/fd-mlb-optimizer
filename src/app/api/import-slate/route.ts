@@ -360,9 +360,9 @@ function calcPitcherPoints(p: Props): { projected: number; upside: number } {
   // Upside: ~90th percentile start. Great pitcher day = 50-70 FD pts.
   // Use alt K tiers to find realistic ceiling Ks.
   let upsideKs = ksLine + 1.5;
-  if (p.ks_alt_8plus && oddsToProb(p.ks_alt_8plus) > 0.10) upsideKs = Math.max(upsideKs, 8);
-  if (p.ks_alt_9plus && oddsToProb(p.ks_alt_9plus) > 0.05) upsideKs = Math.max(upsideKs, 9);
-  if (p.ks_alt_10plus && oddsToProb(p.ks_alt_10plus) > 0.03) upsideKs = Math.max(upsideKs, 10);
+  if (p.ks_alt_8plus && oddsToProb(p.ks_alt_8plus) > 0.25) upsideKs = Math.max(upsideKs, 8);
+  if (p.ks_alt_9plus && oddsToProb(p.ks_alt_9plus) > 0.15) upsideKs = Math.max(upsideKs, 9);
+  if (p.ks_alt_10plus && oddsToProb(p.ks_alt_10plus) > 0.10) upsideKs = Math.max(upsideKs, 10);
 
   const upsideOuts = Math.min(outsLine + 3, 21); // cap at 7 IP
   const upsideER = Math.max(0, expectedER - 1.5);

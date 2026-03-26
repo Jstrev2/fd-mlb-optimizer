@@ -157,7 +157,7 @@ function calcP(p){
   const eIP=eo/3,eER=eIP*.4,wp=p.win_odds?o2p(p.win_odds):.45;
   const qp=eo>=18?.50:eo>=16?.35:eo>=14?.20:.10;
   const proj=ek*3+eo*1+eER*-3+wp*6+qp*4;
-  let uk=kl+1.5;if(p.ks_alt_8plus&&o2p(p.ks_alt_8plus)>.10)uk=Math.max(uk,8);if(p.ks_alt_9plus&&o2p(p.ks_alt_9plus)>.05)uk=Math.max(uk,9);if(p.ks_alt_10plus&&o2p(p.ks_alt_10plus)>.03)uk=Math.max(uk,10);
+  let uk=kl+1.5;if(p.ks_alt_8plus&&o2p(p.ks_alt_8plus)>.25)uk=Math.max(uk,8);if(p.ks_alt_9plus&&o2p(p.ks_alt_9plus)>.15)uk=Math.max(uk,9);if(p.ks_alt_10plus&&o2p(p.ks_alt_10plus)>.10)uk=Math.max(uk,10);
   const uo=Math.min(ol+3,21),ue=Math.max(0,eER-1.5),uw=Math.min(1,wp+.15),uq=eIP>=4.5?Math.min(1,qp+.25):qp;
   return{projected:Math.round(proj*10)/10,upside:Math.round((uk*3+uo*1+ue*-3+uw*6+uq*4)*10)/10};
 }
