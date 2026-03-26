@@ -136,19 +136,56 @@ async function getProps(eid){
 }
 
 function calcB(p){
-  const hp=p.hit_odds?o2p(p.hit_odds):0.55,h2=p.hits_2plus?o2p(p.hits_2plus):hp*.25,h3=p.hits_3plus?o2p(p.hits_3plus):h2*.15;
-  const sp=p.single_odds?o2p(p.single_odds):hp*.65,dp=p.double_odds?o2p(p.double_odds):hp*.15,tp=p.triple_odds?o2p(p.triple_odds):hp*.02,hrp=p.hr_odds?o2p(p.hr_odds):hp*.08;
-  const t4=p.tb_4plus?o2p(p.tb_4plus):.08,t5=p.tb_5plus?o2p(p.tb_5plus):.03;
-  const rp=p.rbi_odds?o2p(p.rbi_odds):.30,r2=p.rbis_2plus?o2p(p.rbis_2plus):rp*.25,r3=p.rbis_3plus?o2p(p.rbis_3plus):r2*.15;
-  const rnp=p.run_odds?o2p(p.run_odds):.30,rn2=p.runs_2plus?o2p(p.runs_2plus):rnp*.20;
-  const sbp=p.sb_odds?o2p(p.sb_odds):.05;
-  const eH=(hp-h2)*1+(h2-h3)*2+h3*3;
-  const tot=sp+dp+tp+hrp;const sf=tot>0?sp/tot:.65,df=tot>0?dp/tot:.18,tf=tot>0?tp/tot:.02,hf=tot>0?hrp/tot:.15;
-  const hPts=eH*(sf*3+df*6+tf*9+hf*12);
-  const eRBI=(rp-r2)*1+(r2-r3)*2+r3*3.5,eRun=(rnp-rn2)*1+rn2*2.2,eBB=hp*.25,eSB=sbp*.8;
-  const proj=hPts+eRBI*3.5+eRun*3.2+eBB*3+eSB*6+.04*3;
-  let bm=1.3;if(hrp>.15)bm+=.15;else if(hrp>.08)bm+=.08;if(h2>.35)bm+=.1;if(h3>.10)bm+=.1;if(t4>.10)bm+=.15;if(t5>.05)bm+=.1;if(r2>.15)bm+=.1;if(r3>.05)bm+=.1;if(sbp>.15)bm+=.1;
-  return{projected:Math.round(proj*10)/10,upside:Math.round(proj*Math.min(bm,2.2)*10)/10};
+  // === PROJECTED: E[X] = sum of P(X >= k) for each stat tier ===
+  // This is a mathematical identity for non-negative integer random variables.
+
+  // Expected Total Bases (each TB = 3 FD pts since 1B=3, 2B=6, 3B=9, HR=12)
+  const tb1=p.hit_odds?o2p(p.hit_odds):0; // P(1+ TB) ≈ P(hit)
+  const tb2=p.tb_2plus?o2p(p.tb_2plus):0;
+  const tb3=p.tb_3plus?o2p(p.tb_3plus):0;
+  const tb4=p.tb_4plus?o2p(p.tb_4plus):0;
+  const tb5=p.tb_5plus?o2p(p.tb_5plus):0;
+  const expTB=tb1+tb2+tb3+tb4+tb5;
+  const hitPts=expTB*3; // Each TB = 3 FD pts
+
+  // Expected RBIs
+  const rbi1=p.rbi_odds?o2p(p.rbi_odds):0;
+  const rbi2=p.rbis_2plus?o2p(p.rbis_2plus):0;
+  const rbi3=p.rbis_3plus?o2p(p.rbis_3plus):0;
+  const rbi4=p.rbis_4plus?o2p(p.rbis_4plus):0;
+  const expRBI=rbi1+rbi2+rbi3+rbi4;
+
+  // Expected Runs
+  const run1=p.run_odds?o2p(p.run_odds):0;
+  const run2=p.runs_2plus?o2p(p.runs_2plus):0;
+  const run3=p.runs_3plus?o2p(p.runs_3plus):0;
+  const expRun=run1+run2+run3;
+
+  // Expected SBs
+  const sb1=p.sb_odds?o2p(p.sb_odds):0;
+  const sb2=p.sbs_2plus?o2p(p.sbs_2plus):0;
+  const expSB=sb1+sb2;
+
+  // BB/HBP: no prop data, estimate ~0.35 combined per game
+  const expBB=0.35;
+
+  const proj=hitPts + expRBI*3.5 + expRun*3.2 + expBB*3 + expSB*6;
+
+  // If we have zero tier data, projected=0 (don't fake it)
+  if(!p.hit_odds&&!p.tb_2plus&&!p.rbi_odds&&!p.run_odds) return{projected:0,upside:0};
+
+  // === UPSIDE: 20% cumulative threshold for each stat tier ===
+  // Find highest tier where P(X+) >= 20% — roughly a 1-in-5 "good game"
+  function upTier(tiers){let best=0;for(const[k,odds]of tiers){if(odds&&o2p(odds)>=0.20)best=k;}return best;}
+
+  const upTB=upTier([[1,p.hit_odds],[2,p.tb_2plus],[3,p.tb_3plus],[4,p.tb_4plus],[5,p.tb_5plus]]);
+  const upRBI=upTier([[1,p.rbi_odds],[2,p.rbis_2plus],[3,p.rbis_3plus],[4,p.rbis_4plus]]);
+  const upRun=upTier([[1,p.run_odds],[2,p.runs_2plus],[3,p.runs_3plus]]);
+  const upSB=upTier([[1,p.sb_odds],[2,p.sbs_2plus]]);
+
+  const upside=upTB*3 + upRBI*3.5 + upRun*3.2 + expBB*3 + upSB*6;
+
+  return{projected:Math.round(proj*10)/10,upside:Math.round(upside*10)/10};
 }
 
 function calcP(p){

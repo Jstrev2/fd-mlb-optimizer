@@ -256,77 +256,56 @@ async function getEventProps(eventId: string): Promise<Map<string, Props>> {
 
 // ============ SCORING ENGINE ============
 function calcBatterPoints(p: Props): { projected: number; upside: number } {
-  // Use tiered probabilities for precise expected value
-  const hitProb = p.hit_odds ? oddsToProb(p.hit_odds) : 0.55;
-  const hit2Prob = p.hits_2plus ? oddsToProb(p.hits_2plus) : hitProb * 0.25;
-  const hit3Prob = p.hits_3plus ? oddsToProb(p.hits_3plus) : hit2Prob * 0.15;
+  // === PROJECTED: E[X] = sum of P(X >= k) for each stat tier ===
+  const tb1 = p.hit_odds ? oddsToProb(p.hit_odds) : 0;
+  const tb2 = p.tb_2plus ? oddsToProb(p.tb_2plus) : 0;
+  const tb3 = p.tb_3plus ? oddsToProb(p.tb_3plus) : 0;
+  const tb4 = p.tb_4plus ? oddsToProb(p.tb_4plus) : 0;
+  const tb5 = p.tb_5plus ? oddsToProb(p.tb_5plus) : 0;
+  const expTB = tb1 + tb2 + tb3 + tb4 + tb5;
+  const hitPts = expTB * 3; // Each TB = 3 FD pts (1B=3,2B=6,3B=9,HR=12)
 
-  const singleProb = p.single_odds ? oddsToProb(p.single_odds) : hitProb * 0.65;
-  const doubleProb = p.double_odds ? oddsToProb(p.double_odds) : hitProb * 0.15;
-  const tripleProb = p.triple_odds ? oddsToProb(p.triple_odds) : hitProb * 0.02;
-  const hrProb = p.hr_odds ? oddsToProb(p.hr_odds) : hitProb * 0.08;
+  const rbi1 = p.rbi_odds ? oddsToProb(p.rbi_odds) : 0;
+  const rbi2 = p.rbis_2plus ? oddsToProb(p.rbis_2plus) : 0;
+  const rbi3 = p.rbis_3plus ? oddsToProb(p.rbis_3plus) : 0;
+  const rbi4 = p.rbis_4plus ? oddsToProb(p.rbis_4plus) : 0;
+  const expRBI = rbi1 + rbi2 + rbi3 + rbi4;
 
-  const tb2Prob = p.tb_2plus ? oddsToProb(p.tb_2plus) : 0.35;
-  const tb3Prob = p.tb_3plus ? oddsToProb(p.tb_3plus) : 0.15;
-  const tb4Prob = p.tb_4plus ? oddsToProb(p.tb_4plus) : 0.08;
-  const tb5Prob = p.tb_5plus ? oddsToProb(p.tb_5plus) : 0.03;
+  const run1 = p.run_odds ? oddsToProb(p.run_odds) : 0;
+  const run2 = p.runs_2plus ? oddsToProb(p.runs_2plus) : 0;
+  const run3 = p.runs_3plus ? oddsToProb(p.runs_3plus) : 0;
+  const expRun = run1 + run2 + run3;
 
-  const rbiProb = p.rbi_odds ? oddsToProb(p.rbi_odds) : 0.30;
-  const rbi2Prob = p.rbis_2plus ? oddsToProb(p.rbis_2plus) : rbiProb * 0.25;
-  const rbi3Prob = p.rbis_3plus ? oddsToProb(p.rbis_3plus) : rbi2Prob * 0.15;
+  const sb1 = p.sb_odds ? oddsToProb(p.sb_odds) : 0;
+  const sb2 = p.sbs_2plus ? oddsToProb(p.sbs_2plus) : 0;
+  const expSB = sb1 + sb2;
 
-  const runProb = p.run_odds ? oddsToProb(p.run_odds) : 0.30;
-  const run2Prob = p.runs_2plus ? oddsToProb(p.runs_2plus) : runProb * 0.20;
+  const expBB = 0.35;
+  const projected = hitPts + expRBI * 3.5 + expRun * 3.2 + expBB * 3 + expSB * 6;
 
-  const sbProb = p.sb_odds ? oddsToProb(p.sb_odds) : 0.05;
+  if (!p.hit_odds && !p.tb_2plus && !p.rbi_odds && !p.run_odds) return { projected: 0, upside: 0 };
 
-  // Expected hits by type using tiered probs
-  // P(exactly 1 hit) = hitProb - hit2Prob
-  // P(exactly 2 hits) = hit2Prob - hit3Prob
-  // P(3+ hits) = hit3Prob
-  const expectedHits = (hitProb - hit2Prob) * 1 + (hit2Prob - hit3Prob) * 2 + hit3Prob * 3;
+  // === UPSIDE: 20% cumulative threshold per stat tier ===
+  function upTier(tiers: [number, number | null][]): number {
+    let best = 0;
+    for (const [k, odds] of tiers) { if (odds && oddsToProb(odds) >= 0.20) best = k; }
+    return best;
+  }
 
-  // Expected hit composition
-  const totalHitTypeProb = singleProb + doubleProb + tripleProb + hrProb;
-  const singleFrac = totalHitTypeProb > 0 ? singleProb / totalHitTypeProb : 0.65;
-  const doubleFrac = totalHitTypeProb > 0 ? doubleProb / totalHitTypeProb : 0.18;
-  const tripleFrac = totalHitTypeProb > 0 ? tripleProb / totalHitTypeProb : 0.02;
-  const hrFrac = totalHitTypeProb > 0 ? hrProb / totalHitTypeProb : 0.15;
+  const upTB = upTier([[1, p.hit_odds], [2, p.tb_2plus], [3, p.tb_3plus], [4, p.tb_4plus], [5, p.tb_5plus]]);
+  const upRBI = upTier([[1, p.rbi_odds], [2, p.rbis_2plus], [3, p.rbis_3plus], [4, p.rbis_4plus]]);
+  const upRun = upTier([[1, p.run_odds], [2, p.runs_2plus], [3, p.runs_3plus]]);
+  const upSB = upTier([[1, p.sb_odds], [2, p.sbs_2plus]]);
 
-  // Expected FD points from hits
-  const hitPoints = expectedHits * (singleFrac * 3 + doubleFrac * 6 + tripleFrac * 9 + hrFrac * 12);
-
-  // Expected RBIs from tiered probs
-  const expectedRBIs = (rbiProb - rbi2Prob) * 1 + (rbi2Prob - rbi3Prob) * 2 + rbi3Prob * 3.5;
-
-  // Expected runs
-  const expectedRuns = (runProb - run2Prob) * 1 + run2Prob * 2.2;
-
-  // Expected walks (rough: ~8% of PAs for avg batter, correlated with OBP)
-  const expectedBBs = hitProb * 0.25; // rough proxy
-
-  // Expected SBs
-  const expectedSBs = sbProb * 0.8;
-
-  // HBP: ~1% of PAs, worth 3 FD pts. ~0.04 expected per game.
-  const expectedHBP = 0.04;
-  const projected = hitPoints + expectedRBIs * 3.5 + expectedRuns * 3.2 + expectedBBs * 3 + expectedSBs * 6 + expectedHBP * 3;
-
-  // UPSIDE: ~90th percentile game. A great FD batter day is 25-40 pts.
-  // Model as projected x boom multiplier based on prop profile quality.
-  let boom = 1.3;
-  if (hrProb > 0.15) boom += 0.15; else if (hrProb > 0.08) boom += 0.08;
-  if (hit2Prob > 0.35) boom += 0.1;
-  if (hit3Prob > 0.10) boom += 0.1;
-  if (tb4Prob > 0.10) boom += 0.15;
-  if (tb5Prob > 0.05) boom += 0.1;
-  if (rbi2Prob > 0.15) boom += 0.1;
-  if (rbi3Prob > 0.05) boom += 0.1;
-  if (sbProb > 0.15) boom += 0.1;
-  boom = Math.min(boom, 2.2);
-  const upside = projected * boom;
+  const upside = upTB * 3 + upRBI * 3.5 + upRun * 3.2 + expBB * 3 + upSB * 6;
 
   return {
+    projected: Math.round(projected * 10) / 10,
+    upside: Math.round(upside * 10) / 10,
+  };
+}
+
+function calcPitcherPoints  return {
     projected: Math.round(projected * 10) / 10,
     upside: Math.round(upside * 10) / 10,
   };
