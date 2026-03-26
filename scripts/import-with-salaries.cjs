@@ -252,8 +252,15 @@ async function main(){
   await Promise.all(evs.map(async e=>{const p=await getProps(e.id);for(const[n,d]of p)allP.set(n,d);}));
   console.log(`  Props: ${allP.size} players`);
 
-  const ins=[];let noT=0;
+  // Build set of teams actually on the FanDuel DFS slate (from DFF data)
+  const slateTeams=new Set();
+  for(const[,d]of dff){if(d.team)slateTeams.add(d.team);if(d.opponent)slateTeams.add(d.opponent);}
+  console.log(`  Slate teams: ${[...slateTeams].sort().join(', ')} (${slateTeams.size} teams)`);
+
+  const ins=[];let noT=0,skipped=0;
   for(const r of rg){
+    // Skip players not on the DFS slate
+    if(slateTeams.size>0 && r.team && !slateTeams.has(r.team)){skipped++;continue;}
     const d=fm(r.name,dff),pr=fm(r.name,allP)||{};
     // Use RG team data (real), fall back to DFF
     const team=r.team||d?.team||'',opp=r.opponent||d?.opponent||'';if(!team)noT++;
@@ -288,6 +295,7 @@ async function main(){
     if(!res.ok)console.error(await res.text());
   }
   const wP=ins.filter(p=>p.tb_2plus||p.ks_line).length,wT=ins.filter(p=>p.team).length;
+  if(skipped)console.log(`  Skipped ${skipped} players from non-slate games`);
   console.log(`\n✅ ${ins.length} players | ${wT} w/team | ${wP} w/props | ${evs.length} games | $${Math.min(...ins.map(p=>p.salary))}-$${Math.max(...ins.map(p=>p.salary))}`);
 }
 main().catch(console.error);
