@@ -9,32 +9,56 @@ export interface Player {
   team: string;
   position: Position;
   salary: number;
-  // Batter props
-  total_bases_line: number | null;
-  total_bases_over_odds: number | null;
-  total_bases_upside: number | null;
-  total_bases_upside_odds: number | null;
-  hits_line: number | null;
-  hits_over_odds: number | null;
-  hrs_line: number | null;
-  hrs_over_odds: number | null;
-  rbis_line: number | null;
-  rbis_over_odds: number | null;
-  runs_line: number | null;
-  runs_over_odds: number | null;
-  walks_line: number | null;
-  walks_over_odds: number | null;
-  sbs_line: number | null;
-  sbs_over_odds: number | null;
-  // Pitcher props
+  // Hits tiered
+  hit_odds: number | null;       // to record a hit
+  hits_2plus: number | null;
+  hits_3plus: number | null;
+  hits_4plus: number | null;
+  // Hit types
+  single_odds: number | null;
+  double_odds: number | null;
+  triple_odds: number | null;
+  // HRs
+  hr_odds: number | null;
+  hr_2plus: number | null;
+  // Total bases tiered
+  tb_2plus: number | null;
+  tb_3plus: number | null;
+  tb_4plus: number | null;
+  tb_5plus: number | null;
+  // RBIs tiered
+  rbi_odds: number | null;
+  rbis_2plus: number | null;
+  rbis_3plus: number | null;
+  rbis_4plus: number | null;
+  // Runs tiered
+  run_odds: number | null;
+  runs_2plus: number | null;
+  runs_3plus: number | null;
+  // SBs
+  sb_odds: number | null;
+  sbs_2plus: number | null;
+  // Hits+Runs+RBIs combo
+  hrr_1plus: number | null;
+  hrr_2plus: number | null;
+  hrr_3plus: number | null;
+  hrr_4plus: number | null;
+  // Pitcher: Ks
   ks_line: number | null;
   ks_over_odds: number | null;
+  ks_alt_3plus: number | null;
+  ks_alt_4plus: number | null;
+  ks_alt_5plus: number | null;
+  ks_alt_6plus: number | null;
+  ks_alt_7plus: number | null;
+  ks_alt_8plus: number | null;
+  ks_alt_9plus: number | null;
+  ks_alt_10plus: number | null;
+  // Pitcher: Outs
   outs_line: number | null;
   outs_over_odds: number | null;
-  earned_runs_line: number | null;
-  earned_runs_under_odds: number | null;
-  win_prob: number | null;
-  qs_prob: number | null;
+  // Moneyline (for win prob)
+  win_odds: number | null;
   // Computed
   projected_pts: number;
   upside_pts: number;
