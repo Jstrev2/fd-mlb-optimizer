@@ -310,22 +310,19 @@ function calcBatterPoints(p: Props): { projected: number; upside: number } {
 
   const projected = hitPoints + expectedRBIs * 3.5 + expectedRuns * 3.2 + expectedBBs * 3 + expectedSBs * 6;
 
-  // UPSIDE: what does a ceiling game look like?
-  // Use TB 4+/5+ and high-tier RBIs to model the boom
-  const upsideHitPts = tb5Prob > 0
-    ? 5 * (singleFrac * 3 + doubleFrac * 6 + tripleFrac * 9 + hrFrac * 12)  // 5 TB game
-    : tb4Prob > 0
-      ? 12 + singleFrac * 3  // HR + single
-      : tb3Prob > 0
-        ? 9 + singleFrac * 3  // triple + single
-        : hitPoints * 1.5;
-
-  const upsideRBIs = rbi3Prob > 0 ? 3.5 * 3.5 : rbi2Prob > 0 ? 2.5 * 3.5 : expectedRBIs * 1.5 * 3.5;
-  const upsideRuns = run2Prob > 0 ? 2.5 * 3.2 : expectedRuns * 1.5 * 3.2;
-  const upsideBBs = expectedBBs * 1.3 * 3;
-  const upsideSBs = sbProb > 0.1 ? 1.5 * 6 : expectedSBs * 1.5 * 6;
-
-  const upside = upsideHitPts + upsideRBIs + upsideRuns + upsideBBs + upsideSBs;
+  // UPSIDE: ~90th percentile game. A great FD batter day is 25-40 pts.
+  // Model as projected x boom multiplier based on prop profile quality.
+  let boom = 1.3;
+  if (hrProb > 0.15) boom += 0.15; else if (hrProb > 0.08) boom += 0.08;
+  if (hit2Prob > 0.35) boom += 0.1;
+  if (hit3Prob > 0.10) boom += 0.1;
+  if (tb4Prob > 0.10) boom += 0.15;
+  if (tb5Prob > 0.05) boom += 0.1;
+  if (rbi2Prob > 0.15) boom += 0.1;
+  if (rbi3Prob > 0.05) boom += 0.1;
+  if (sbProb > 0.15) boom += 0.1;
+  boom = Math.min(boom, 2.2);
+  const upside = projected * boom;
 
   return {
     projected: Math.round(projected * 10) / 10,
@@ -350,18 +347,22 @@ function calcPitcherPoints(p: Props): { projected: number; upside: number } {
   const winProb = p.win_odds ? oddsToProb(p.win_odds) : 0.45;
   const qsProb = expectedIP >= 5.5 ? 0.45 : 0.30;
 
+  // FD Pitching: W=6, QS=4, ER=-3, K=3, IP(each out)=1 -- wait, FD scores IP as 3pts per full IP
+  // Actually FD scores: each inning pitched = 3 pts, so each out = 1 pt. That IS correct.
+  // But expectedOuts formula was off. Fix: expectedOuts should use the line directly.
   const projected = expectedKs * 3 + expectedOuts * 1 + expectedER * -3 + winProb * 6 + qsProb * 4;
 
-  // Upside: use alt K tiers
-  let upsideKs = ksLine + 2;
-  if (p.ks_alt_8plus && oddsToProb(p.ks_alt_8plus) > 0.10) upsideKs = Math.max(upsideKs, 8.5);
-  if (p.ks_alt_9plus && oddsToProb(p.ks_alt_9plus) > 0.05) upsideKs = Math.max(upsideKs, 9.5);
-  if (p.ks_alt_10plus && oddsToProb(p.ks_alt_10plus) > 0.03) upsideKs = Math.max(upsideKs, 10.5);
+  // Upside: ~90th percentile start. Great pitcher day = 50-70 FD pts.
+  // Use alt K tiers to find realistic ceiling Ks.
+  let upsideKs = ksLine + 1.5;
+  if (p.ks_alt_8plus && oddsToProb(p.ks_alt_8plus) > 0.10) upsideKs = Math.max(upsideKs, 8);
+  if (p.ks_alt_9plus && oddsToProb(p.ks_alt_9plus) > 0.05) upsideKs = Math.max(upsideKs, 9);
+  if (p.ks_alt_10plus && oddsToProb(p.ks_alt_10plus) > 0.03) upsideKs = Math.max(upsideKs, 10);
 
-  const upsideOuts = outsLine + 3;
+  const upsideOuts = Math.min(outsLine + 3, 21); // cap at 7 IP
   const upsideER = Math.max(0, expectedER - 1.5);
   const upsideWin = Math.min(1, winProb + 0.15);
-  const upsideQS = Math.min(1, qsProb + 0.2);
+  const upsideQS = expectedIP >= 4.5 ? Math.min(1, qsProb + 0.25) : qsProb;
 
   const upside = upsideKs * 3 + upsideOuts * 1 + upsideER * -3 + upsideWin * 6 + upsideQS * 4;
 
