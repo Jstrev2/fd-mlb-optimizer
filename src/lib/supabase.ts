@@ -10,29 +10,35 @@ export interface Player {
   position: Position;
   salary: number;
   // Batter props
-  hits_ou: number | null;       // hits o/u line
-  hrs_ou: number | null;        // HR o/u line
-  rbis_ou: number | null;       // RBI o/u line
-  runs_ou: number | null;       // runs o/u line
-  walks_ou: number | null;      // walks o/u line
-  sbs_ou: number | null;        // stolen bases o/u line
+  total_bases_line: number | null;
+  total_bases_over_odds: number | null;
+  total_bases_upside: number | null;
+  total_bases_upside_odds: number | null;
+  hits_line: number | null;
+  hits_over_odds: number | null;
+  hrs_line: number | null;
+  hrs_over_odds: number | null;
+  rbis_line: number | null;
+  rbis_over_odds: number | null;
+  runs_line: number | null;
+  runs_over_odds: number | null;
+  walks_line: number | null;
+  walks_over_odds: number | null;
+  sbs_line: number | null;
+  sbs_over_odds: number | null;
   // Pitcher props
-  ks_ou: number | null;         // strikeouts o/u line
-  outs_ou: number | null;       // outs recorded o/u line
-  earned_runs_ou: number | null; // earned runs o/u line
-  win_prob: number | null;      // win probability %
-  qs_prob: number | null;       // quality start probability %
+  ks_line: number | null;
+  ks_over_odds: number | null;
+  outs_line: number | null;
+  outs_over_odds: number | null;
+  earned_runs_line: number | null;
+  earned_runs_under_odds: number | null;
+  win_prob: number | null;
+  qs_prob: number | null;
   // Computed
   projected_pts: number;
   upside_pts: number;
-  pts_per_k: number;            // points per $1k salary
+  pts_per_k: number;
   slate_id: string;
-  created_at: string;
-}
-
-export interface Slate {
-  id: string;
-  name: string;
-  date: string;
   created_at: string;
 }
