@@ -194,7 +194,25 @@ function calcB(p){
   const upRun=upInterp([[1,p.run_odds],[2,p.runs_2plus],[3,p.runs_3plus]]);
   const upSB=upInterp([[1,p.sb_odds],[2,p.sbs_2plus]]);
 
-  const upside=upTB*3 + upRBI*3.5 + upRun*3.2 + expBB*3 + upSB*6;
+  let upside=upTB*3 + upRBI*3.5 + upRun*3.2 + expBB*3 + upSB*6;
+
+  // HR scenario boost: a HR locks in 4TB+1R+1RBI simultaneously
+  // Blend HR-scenario upside with independent-stat upside, weighted by HR probability
+  if(p.hr_odds){
+    const hrProb=o2p(p.hr_odds);
+    if(hrProb>=0.08){
+      // HR game floor: 4TB(12pts) + guaranteed run(3.2) + guaranteed RBI(3.5) + BB(1.05)
+      // Plus any additional stats beyond the HR minimum
+      const hrTB=Math.max(upTB,4);
+      const hrRBI=Math.max(upRBI,1);
+      const hrRun=Math.max(upRun,1);
+      const hrUpside=hrTB*3 + hrRBI*3.5 + hrRun*3.2 + expBB*3 + upSB*6;
+      // Blend: weight HR scenario by its probability relative to ~25% threshold
+      // At 25%+ HR prob, HR scenario dominates; at 8% it's a small nudge
+      const hrWeight=Math.min(hrProb/0.25,1)*0.4; // max 40% weight to HR scenario
+      upside=upside*(1-hrWeight)+hrUpside*hrWeight;
+    }
+  }
 
   return{projected:Math.round(proj*10)/10,upside:Math.round(upside*10)/10};
 }

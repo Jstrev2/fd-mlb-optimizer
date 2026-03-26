@@ -303,7 +303,20 @@ function calcBatterPoints(p: Props): { projected: number; upside: number } {
   const upRun = upInterp([[1, p.run_odds], [2, p.runs_2plus], [3, p.runs_3plus]]);
   const upSB = upInterp([[1, p.sb_odds], [2, p.sbs_2plus]]);
 
-  const upside = upTB * 3 + upRBI * 3.5 + upRun * 3.2 + expBB * 3 + upSB * 6;
+  let upside = upTB * 3 + upRBI * 3.5 + upRun * 3.2 + expBB * 3 + upSB * 6;
+
+  // HR scenario boost: a HR locks in 4TB+1R+1RBI simultaneously
+  if (p.hr_odds) {
+    const hrProb = oddsToProb(p.hr_odds);
+    if (hrProb >= 0.08) {
+      const hrTB = Math.max(upTB, 4);
+      const hrRBI = Math.max(upRBI, 1);
+      const hrRun = Math.max(upRun, 1);
+      const hrUpside = hrTB * 3 + hrRBI * 3.5 + hrRun * 3.2 + expBB * 3 + upSB * 6;
+      const hrWeight = Math.min(hrProb / 0.25, 1) * 0.4;
+      upside = upside * (1 - hrWeight) + hrUpside * hrWeight;
+    }
+  }
 
   return {
     projected: Math.round(projected * 10) / 10,
