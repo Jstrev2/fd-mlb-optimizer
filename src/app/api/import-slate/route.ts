@@ -359,10 +359,10 @@ function calcPitcherPoints(p: Props): { projected: number; upside: number } {
 
   // Upside: ~90th percentile start. Great pitcher day = 50-70 FD pts.
   // Use alt K tiers to find realistic ceiling Ks.
-  let upsideKs = ksLine + 1.5;
-  if (p.ks_alt_8plus && oddsToProb(p.ks_alt_8plus) > 0.25) upsideKs = Math.max(upsideKs, 8);
-  if (p.ks_alt_9plus && oddsToProb(p.ks_alt_9plus) > 0.15) upsideKs = Math.max(upsideKs, 9);
-  if (p.ks_alt_10plus && oddsToProb(p.ks_alt_10plus) > 0.10) upsideKs = Math.max(upsideKs, 10);
+  // Upside Ks: walk the alt K ladder, find highest tier with >=20% cumulative prob
+  let upsideKs = ksLine + 1;
+  const kTiers: [number, number|null][] = [[3,p.ks_alt_3plus],[4,p.ks_alt_4plus],[5,p.ks_alt_5plus],[6,p.ks_alt_6plus],[7,p.ks_alt_7plus],[8,p.ks_alt_8plus],[9,p.ks_alt_9plus],[10,p.ks_alt_10plus]];
+  for (const [k, odds] of kTiers) { if (odds && oddsToProb(odds) >= 0.20) upsideKs = k; }
 
   const upsideOuts = Math.min(outsLine + 3, 21); // cap at 7 IP
   const upsideER = Math.max(0, expectedER - 1.5);

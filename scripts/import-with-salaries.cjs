@@ -152,12 +152,28 @@ function calcB(p){
 }
 
 function calcP(p){
-  const kl=p.ks_line||5,kop=p.ks_over_odds?o2p(p.ks_over_odds):.5,ek=kl+(kop-.5)*2;
+  const kl=p.ks_line||5,kop=p.ks_over_odds?o2p(p.ks_over_odds):.5;
+  // Expected Ks: use O/U line + lean. Also cross-check with alt tiers if available.
+  let ek=kl+(kop-.5)*1.5;
+  // If we have alt tiers, compute weighted expected from the ladder
+  const kTiersE=[[3,p.ks_alt_3plus],[4,p.ks_alt_4plus],[5,p.ks_alt_5plus],[6,p.ks_alt_6plus],[7,p.ks_alt_7plus],[8,p.ks_alt_8plus],[9,p.ks_alt_9plus],[10,p.ks_alt_10plus]];
+  const validTiers=kTiersE.filter(([,o])=>o).map(([k,o])=>[k,o2p(o)]);
+  if(validTiers.length>=3){
+    // E[K] ≈ sum of P(K+) for each tier (since K = sum of indicator variables for each threshold)
+    let tierExp=0;for(const[,cp]of validTiers)tierExp+=cp;
+    // Add base (below lowest tier)
+    const lowestTier=validTiers[0][0];
+    tierExp+=lowestTier-1; // assume ~100% chance of getting at least (lowest-1) Ks
+    ek=Math.max(ek,tierExp*0.85); // slight discount, use whichever is higher
+  }
   const ol=p.outs_line||16,oop=p.outs_over_odds?o2p(p.outs_over_odds):.5,eo=ol+(oop-.5)*2;
   const eIP=eo/3,eER=eIP*.4,wp=p.win_odds?o2p(p.win_odds):.45;
   const qp=eo>=18?.50:eo>=16?.35:eo>=14?.20:.10;
   const proj=ek*3+eo*1+eER*-3+wp*6+qp*4;
-  let uk=kl+1.5;if(p.ks_alt_8plus&&o2p(p.ks_alt_8plus)>.25)uk=Math.max(uk,8);if(p.ks_alt_9plus&&o2p(p.ks_alt_9plus)>.15)uk=Math.max(uk,9);if(p.ks_alt_10plus&&o2p(p.ks_alt_10plus)>.10)uk=Math.max(uk,10);
+  // Upside Ks: walk the alt K ladder, find highest tier with >=20% cumulative prob
+  let uk=kl+1;
+  const kTiers=[[3,p.ks_alt_3plus],[4,p.ks_alt_4plus],[5,p.ks_alt_5plus],[6,p.ks_alt_6plus],[7,p.ks_alt_7plus],[8,p.ks_alt_8plus],[9,p.ks_alt_9plus],[10,p.ks_alt_10plus]];
+  for(const[k,odds]of kTiers){if(odds&&o2p(odds)>=0.20)uk=k;}
   const uo=Math.min(ol+3,21),ue=Math.max(0,eER-1.5),uw=Math.min(1,wp+.15),uq=eIP>=4.5?Math.min(1,qp+.25):qp;
   return{projected:Math.round(proj*10)/10,upside:Math.round((uk*3+uo*1+ue*-3+uw*6+uq*4)*10)/10};
 }
