@@ -305,12 +305,6 @@ function calcBatterPoints(p: Props): { projected: number; upside: number } {
   };
 }
 
-function calcPitcherPoints  return {
-    projected: Math.round(projected * 10) / 10,
-    upside: Math.round(upside * 10) / 10,
-  };
-}
-
 function calcPitcherPoints(p: Props): { projected: number; upside: number } {
   const ksLine = p.ks_line || 5;
   const ksOverProb = p.ks_over_odds ? oddsToProb(p.ks_over_odds) : 0.5;
