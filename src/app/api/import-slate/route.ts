@@ -372,7 +372,7 @@ function calcPitcherPoints(p: Props): { projected: number; upside: number } {
 }
 
 // ============ DFF SALARY SCRAPER ============
-interface DFFPlayer { name: string; position: string; salary: number; team: string; dff_projected: number; }
+interface DFFPlayer { name: string; position: string; salary: number; team: string; opponent: string; dff_projected: number; }
 
 async function getDFFPlayers(): Promise<DFFPlayer[]> {
   const res = await fetch("https://www.dailyfantasyfuel.com/mlb/projections/fanduel", {
@@ -392,12 +392,12 @@ async function getDFFPlayers(): Promise<DFFPlayer[]> {
   const pitcherRegex = /(?:^|\n)P\n([\w][\w\s.'-]+?)\s*(?:DTD\s*)?\n?•\s*\([LRS]\)\n\$\n?([\d.]+)k\n(?:YES|EXP\.)\n(\w{2,3})\n(\w{2,3})\n([\d.]+)/gm;
   let match;
   while ((match = pitcherRegex.exec(text)) !== null) {
-    players.push({ name: match[1].trim(), position: "P", salary: Math.round(parseFloat(match[2]) * 1000), team: match[3], dff_projected: parseFloat(match[5]) || 0 });
+    players.push({ name: match[1].trim(), position: "P", salary: Math.round(parseFloat(match[2]) * 1000), team: match[3], opponent: match[4], dff_projected: parseFloat(match[5]) || 0 });
   }
 
   const batterRegex = /(?:^|\n)(C(?:\/OF)?|1B(?:\/1B)?|2B(?:\/(?:SS|OF|2B))?|3B(?:\/(?:2B|3B))?|SS(?:\/SS)?|OF(?:\/OF)?)\n([\w][\w\s.'-]+?)\s*(?:DTD\s*)?\n?•\s*\([LRS]\)\n\$\n?([\d.]+)k\n(?:YES|EXP\.)\n(\w{2,3})\n(\w{2,3})\n(\d+)\s*(?:✓)?\n([\d.]+)/gm;
   while ((match = batterRegex.exec(text)) !== null) {
-    players.push({ name: match[2].trim(), position: match[1].split("/")[0], salary: Math.round(parseFloat(match[3]) * 1000), team: match[4], dff_projected: parseFloat(match[7]) || 0 });
+    players.push({ name: match[2].trim(), position: match[1].split("/")[0], salary: Math.round(parseFloat(match[3]) * 1000), team: match[4], opponent: match[5], dff_projected: parseFloat(match[7]) || 0 });
   }
 
   return players;
@@ -458,7 +458,7 @@ export async function POST() {
         : { projected: dff.dff_projected, upside: Math.round(dff.dff_projected * 1.3 * 10) / 10 };
 
       return {
-        name: dff.name, team: dff.team, position: dff.position, salary: dff.salary,
+        name: dff.name, team: dff.team, opponent: dff.opponent || '', position: dff.position, salary: dff.salary,
         ...(props || emptyProps()),
         projected_pts: pts.projected,
         upside_pts: pts.upside,

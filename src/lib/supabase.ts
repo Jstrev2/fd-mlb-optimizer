@@ -63,6 +63,7 @@ export interface Player {
   projected_pts: number;
   upside_pts: number;
   pts_per_k: number;
+  opponent: string;
   slate_id: string;
   created_at: string;
 }
