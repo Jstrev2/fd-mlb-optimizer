@@ -467,6 +467,67 @@ export async function POST() {
       };
     });
 
+    // BACKFILL: For games with no DFF data (started/removed), use FD props + avg salary
+    const dffTeams = new Set(inserts.map((p) => p.team));
+    const AVG_SALARY: Record<string, number> = { P: 9000, C: 2600, "1B": 3000, "2B": 3000, "3B": 2900, SS: 3100, OF: 2900 };
+
+    for (const ev of todayEvents) {
+      // Parse team names from event name: "Away Team (Pitcher) @ Home Team (Pitcher)"
+      const tm = ev.name.match(/^(.+?)\s*\(.+?\)\s*@\s*(.+?)\s*\(.+?\)$/);
+      if (!tm) continue;
+
+      // Map full team names to abbreviations
+      const TEAM_ABBR: Record<string, string> = {
+        "Pittsburgh Pirates": "PIT", "New York Mets": "NYM", "Chicago White Sox": "CWS",
+        "Milwaukee Brewers": "MIL", "Washington Nationals": "WAS", "Chicago Cubs": "CHC",
+        "Minnesota Twins": "MIN", "Baltimore Orioles": "BAL", "Boston Red Sox": "BOS",
+        "Cincinnati Reds": "CIN", "Los Angeles Angels": "LAA", "Houston Astros": "HOU",
+        "Tampa Bay Rays": "TB", "St. Louis Cardinals": "STL", "Texas Rangers": "TEX",
+        "Philadelphia Phillies": "PHI", "Detroit Tigers": "DET", "San Diego Padres": "SD",
+        "Los Angeles Dodgers": "LAD", "Arizona Diamondbacks": "ARI", "Seattle Mariners": "SEA",
+        "Cleveland Guardians": "CLE", "New York Yankees": "NYY", "Toronto Blue Jays": "TOR",
+        "Atlanta Braves": "ATL", "Colorado Rockies": "COL", "San Francisco Giants": "SF",
+        "Kansas City Royals": "KC", "Oakland Athletics": "OAK", "Miami Marlins": "MIA",
+      };
+
+      const awayAbbr = TEAM_ABBR[tm[1].trim()] || tm[1].trim().substring(0, 3).toUpperCase();
+      const homeAbbr = TEAM_ABBR[tm[2].trim()] || tm[2].trim().substring(0, 3).toUpperCase();
+
+      if (dffTeams.has(awayAbbr) && dffTeams.has(homeAbbr)) continue;
+
+      // This game has missing DFF data — backfill from prop names
+      const gameProps = await getEventProps(ev.id);
+      for (const [playerName, props] of gameProps.entries()) {
+        // Determine if pitcher or batter
+        const isPitcher = props.ks_line !== null || props.ks_over_odds !== null;
+        const guessTeam = isPitcher ? awayAbbr : ""; // rough guess
+        const pts = isPitcher ? calcPitcherPoints(props) : calcBatterPoints(props);
+
+        // Determine position from prop data
+        let position = "OF"; // default for batters
+        if (isPitcher) position = "P";
+
+        const salary = AVG_SALARY[position] || 3000;
+        const opp = isPitcher ? homeAbbr : "";
+
+        // Only add if not already in inserts
+        if (!inserts.find((p) => p.name === playerName)) {
+          inserts.push({
+            name: playerName,
+            team: guessTeam || awayAbbr,
+            opponent: opp || homeAbbr,
+            position,
+            salary,
+            ...props,
+            projected_pts: pts.projected,
+            upside_pts: pts.upside,
+            pts_per_k: salary > 0 ? Math.round((pts.upside / (salary / 1000)) * 10) / 10 : 0,
+            slate_id: "main",
+          });
+        }
+      }
+    }
+
     // Clear and insert
     await supabase.from("players").delete().neq("id", "00000000-0000-0000-0000-000000000000");
     const { data, error } = await supabase.from("players").insert(inserts).select();
