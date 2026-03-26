@@ -1,5 +1,30 @@
 import { Player } from "./supabase";
 
+// ==============================
+// OFFICIAL FANDUEL MLB SCORING
+// ==============================
+// HITTERS:
+//   1B = 3 pts
+//   2B = 6 pts
+//   3B = 9 pts
+//   HR = 12 pts
+//   RBI = 3.5 pts
+//   R (run scored) = 3.2 pts
+//   BB (walk) = 3 pts
+//   SB (stolen base) = 6 pts
+//   HBP (hit by pitch) = 3 pts
+//
+// PITCHERS:
+//   W (win) = 6 pts
+//   QS (quality start: 6+ IP, ≤3 ER) = 4 pts
+//   ER (earned run) = -3 pts
+//   K (strikeout) = 3 pts
+//   IP = 3 pts per full inning (1 pt per out recorded)*
+//   *Fractional scoring per out
+//
+// NOT SCORED: hits allowed, walks allowed, losses, caught stealing
+// ==============================
+
 // === ODDS CONVERSION ===
 export function oddsToProb(americanOdds: number): number {
   if (americanOdds > 0) return 100 / (americanOdds + 100);

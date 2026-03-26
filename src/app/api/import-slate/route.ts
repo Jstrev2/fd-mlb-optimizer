@@ -308,7 +308,9 @@ function calcBatterPoints(p: Props): { projected: number; upside: number } {
   // Expected SBs
   const expectedSBs = sbProb * 0.8;
 
-  const projected = hitPoints + expectedRBIs * 3.5 + expectedRuns * 3.2 + expectedBBs * 3 + expectedSBs * 6;
+  // HBP: ~1% of PAs, worth 3 FD pts. ~0.04 expected per game.
+  const expectedHBP = 0.04;
+  const projected = hitPoints + expectedRBIs * 3.5 + expectedRuns * 3.2 + expectedBBs * 3 + expectedSBs * 6 + expectedHBP * 3;
 
   // UPSIDE: ~90th percentile game. A great FD batter day is 25-40 pts.
   // Model as projected x boom multiplier based on prop profile quality.
@@ -333,11 +335,13 @@ function calcBatterPoints(p: Props): { projected: number; upside: number } {
 function calcPitcherPoints(p: Props): { projected: number; upside: number } {
   const ksLine = p.ks_line || 5;
   const ksOverProb = p.ks_over_odds ? oddsToProb(p.ks_over_odds) : 0.5;
-  const expectedKs = ksLine * (0.5 + ksOverProb * 0.3);
+  // Expected Ks: line + adjustment based on over probability
+  const expectedKs = ksLine + (ksOverProb - 0.5) * 2;
 
   const outsLine = p.outs_line || 16;
   const outsOverProb = p.outs_over_odds ? oddsToProb(p.outs_over_odds) : 0.5;
-  const expectedOuts = outsLine * (0.5 + outsOverProb * 0.3);
+  // Expected outs: if line is 16.5 and over is -110, expected ~ line + (overProb - 0.5) * 2
+  const expectedOuts = outsLine + (outsOverProb - 0.5) * 2;
 
   // Rough ER estimate based on outs (more outs = more IP = slightly more ER but also QS)
   const expectedIP = expectedOuts / 3;
@@ -345,7 +349,8 @@ function calcPitcherPoints(p: Props): { projected: number; upside: number } {
 
   // Win prob from moneyline or estimate
   const winProb = p.win_odds ? oddsToProb(p.win_odds) : 0.45;
-  const qsProb = expectedIP >= 5.5 ? 0.45 : 0.30;
+  // QS = 6+ IP (18+ outs) and <= 3 ER. Estimate based on outs line.
+  const qsProb = expectedOuts >= 18 ? 0.50 : expectedOuts >= 16 ? 0.35 : expectedOuts >= 14 ? 0.20 : 0.10;
 
   // FD Pitching: W=6, QS=4, ER=-3, K=3, IP(each out)=1 -- wait, FD scores IP as 3pts per full IP
   // Actually FD scores: each inning pitched = 3 pts, so each out = 1 pt. That IS correct.
