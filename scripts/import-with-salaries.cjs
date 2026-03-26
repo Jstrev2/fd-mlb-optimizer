@@ -15,27 +15,84 @@ const BM={'PLAYER_TO_RECORD_A_HIT':'hit_odds','PLAYER_TO_RECORD_2+_HITS':'hits_2
 async function scrapeRG(){
   console.log('Scraping RotoGrinders...');
   const b=await puppeteer.launch({executablePath:'/usr/bin/google-chrome-stable',headless:true,args:['--no-sandbox','--disable-setuid-sandbox']});
-  const p=await b.newPage();await p.setUserAgent(UA);
-  await p.goto('https://rotogrinders.com/lineups/mlb?site=fanduel',{waitUntil:'networkidle2',timeout:25000});
+  const pg=await b.newPage();await pg.setUserAgent(UA);
+  await pg.goto('https://rotogrinders.com/lineups/mlb?site=fanduel',{waitUntil:'networkidle2',timeout:25000});
   await new Promise(r=>setTimeout(r,3000));
-  const t=await p.evaluate(()=>document.body.innerText);await b.close();
+  const t=await pg.evaluate(()=>document.body.innerText);await b.close();
+  const lines=t.split('\n').map(l=>l.trim()).filter(l=>l);
+
+  // City-to-abbreviation map
+  const CITY_MAP={'PITTSBURGH':'PIT','NEW YORK':'NYM','CHICAGO':'CHC','MILWAUKEE':'MIL',
+    'WASHINGTON':'WAS','MINNESOTA':'MIN','BALTIMORE':'BAL','BOSTON':'BOS','CINCINNATI':'CIN',
+    'LOS ANGELES':'LAA','HOUSTON':'HOU','TAMPA BAY':'TB','ST. LOUIS':'STL','TEXAS':'TEX',
+    'PHILADELPHIA':'PHI','DETROIT':'DET','SAN DIEGO':'SD','ARIZONA':'ARI','SEATTLE':'SEA',
+    'CLEVELAND':'CLE','TORONTO':'TOR','ATLANTA':'ATL','COLORADO':'COL','SAN FRANCISCO':'SF',
+    'KANSAS CITY':'KC','OAKLAND':'OAK','MIAMI':'MIA'};
+  // Team name disambiguation (when city appears for multiple teams)
+  const TEAM_NAME_MAP={'METS':'NYM','YANKEES':'NYY','CUBS':'CHC','WHITE SOX':'CWS',
+    'ANGELS':'LAA','DODGERS':'LAD','PIRATES':'PIT','BREWERS':'MIL','NATIONALS':'WAS',
+    'TWINS':'MIN','ORIOLES':'BAL','RED SOX':'BOS','REDS':'CIN','ASTROS':'HOU',
+    'RAYS':'TB','CARDINALS':'STL','RANGERS':'TEX','PHILLIES':'PHI','TIGERS':'DET',
+    'PADRES':'SD','DIAMONDBACKS':'ARI','MARINERS':'SEA','GUARDIANS':'CLE','BLUE JAYS':'TOR',
+    'BRAVES':'ATL','ROCKIES':'COL','GIANTS':'SF','ROYALS':'KC','ATHLETICS':'OAK','MARLINS':'MIA'};
+
+  // Parse: find game headers, then assign teams to players between headers
+  // Game header pattern: "TIME ET" then "CITY" then "TEAM_NAME" then "CITY" then "TEAM_NAME"
+  const games = []; // {lineIdx, away, home}
+  for(let i=0;i<lines.length-4;i++){
+    if(lines[i].match(/^\d{1,2}:\d{2}\s*(AM|PM)\s*ET$/i)){
+      const city1=lines[i+1];const name1=lines[i+2];const city2=lines[i+3];const name2=lines[i+4];
+      const away=TEAM_NAME_MAP[name1]||CITY_MAP[city1]||'';
+      const home=TEAM_NAME_MAP[name2]||CITY_MAP[city2]||'';
+      if(away&&home)games.push({lineIdx:i,away,home});
+    }
+  }
+
+  // Now parse players and assign teams based on position between game headers
   const players=[];
-  const tlines=t.split('\n').map(l=>l.trim()).filter(l=>l);
-  for(let i=0;i<tlines.length;i++){
-    const line=tlines[i];
-    // Batters: "Name (L/R/S) POS $X.XK" on one line
+  let currentAway='',currentHome='',teamState='awayPitcher'; // awayPitcher->awayBatters->homePitcher->homeBatters
+  let gameIdx=0;
+
+  for(let i=0;i<lines.length;i++){
+    // Check if we've hit a new game header
+    if(gameIdx<games.length&&i>=games[gameIdx].lineIdx){
+      currentAway=games[gameIdx].away;currentHome=games[gameIdx].home;
+      teamState='awayPitcher';gameIdx++;
+      continue;
+    }
+
+    const line=lines[i];
+    // Batters: "Name (L/R/S) POS/POS $X.XK"
     const m1=line.match(/^(.+?)\s+\([LRS]\)\s+([\w\/]+)\s+\$([\d.]+)K$/i);
-    if(m1){players.push({name:m1[1].trim(),position:m1[2].split('/')[0],salary:Math.round(parseFloat(m1[3])*1000)});continue;}
-    // Pitchers: "Name" then "(R) P $X.XK" on next line
-    if(i+1<tlines.length){
-      const nx=tlines[i+1];
+    if(m1){
+      const isAway=teamState==='awayPitcher'||teamState==='awayBatters';
+      const team=isAway?currentAway:currentHome;
+      const opp=isAway?currentHome:currentAway;
+      players.push({name:m1[1].trim(),position:m1[2].split('/')[0],salary:Math.round(parseFloat(m1[3])*1000),team,opponent:opp});
+      if(teamState==='awayPitcher')teamState='awayBatters';
+      if(teamState==='homePitcher')teamState='homeBatters';
+      continue;
+    }
+    // Pitchers: "Name" then "(L/R/S) P $X.XK" on next line
+    if(i+1<lines.length){
+      const nx=lines[i+1];
       const m2=nx.match(/^\([LRS]\)\s+P\s+\$([\d.]+)K$/i);
-      if(m2 && line.length>3 && !line.match(/^\d/) && !line.includes('O/U') && !line.includes('$')){
-        players.push({name:line,position:'P',salary:Math.round(parseFloat(m2[1])*1000)});
-        i++;
+      if(m2&&line.length>3&&!line.match(/^\d/)&&!line.includes('O/U')&&!line.includes('$')&&!line.includes('%')&&!line.match(/^[A-Z]{2,}$/)){
+        // Second pitcher in a game = switch to home team
+        // (first pitcher is away, second is home)
+        const isAway=teamState==='awayPitcher'||teamState==='awayBatters';
+        const team=isAway?currentAway:currentHome;
+        const opp=isAway?currentHome:currentAway;
+        players.push({name:line,position:'P',salary:Math.round(parseFloat(m2[1])*1000),team,opponent:opp});
+        // After away pitcher, batters follow. After 2nd pitcher (home), home batters follow.
+        if(teamState==='awayPitcher')teamState='awayBatters';
+        else if(teamState==='awayBatters')teamState='homeBatters'; // 2nd pitcher = home
+        else if(teamState==='homePitcher')teamState='homeBatters';
+        i++;continue;
       }
     }
   }
+
   console.log(`  RG: ${players.length} players`);return players;
 }
 
@@ -69,10 +126,10 @@ async function getProps(eid){
   }catch{}
   try{const r=await fetch(`${FD_API}/event-page?eventId=${eid}&tab=pitcher-props&_ak=${AK}`,{headers:{'User-Agent':UA}});const d=await r.json();
     for(const mk of Object.values(d?.attachments?.markets||{})){const mt=mk.marketType||'',mn=mk.marketName||'',rs=mk.runners||[];
-      if(mt==='PITCHER_A_TOTAL_STRIKEOUTS'||mt==='PITCHER_B_TOTAL_STRIKEOUTS'){const p=g(mn.replace(/ - Strikeouts$/,''));for(const rn of rs){if((rn.runnerName||'').includes('Over')){p.ks_line=Number(rn.handicap)||0;p.ks_over_odds=gO(rn);}}}
-      if(mt==='PITCHER_A_STRIKEOUTS'||mt==='PITCHER_B_STRIKEOUTS'){for(const rn of rs){const x=(rn.runnerName||'').match(/^(.+?)\s+(\d+)\+\s*Strikeouts$/);if(x){const p=g(x[1]);const t=parseInt(x[2]);if(t>=3&&t<=8)p[`ks_alt_${t}plus`]=gO(rn);}}}
-      if(mt==='PITCHING_SPECIALS_SB'||mt==='PITCHING_SPECIALS_SB_B'){for(const rn of rs){const x=(rn.runnerName||'').match(/^(.+?)\s+(\d+)\+\s*Strikeouts$/);if(x){const p=g(x[1]);const t=parseInt(x[2]);if(t===9)p.ks_alt_9plus=gO(rn);if(t===10)p.ks_alt_10plus=gO(rn);}}}
-      if(mt==='PITCHER_A_OUTS_RECORDED'||mt==='PITCHER_B_OUTS_RECORDED'){const p=g(mn.replace(/ Outs Recorded$/,''));for(const rn of rs){if(rn.runnerName==='Over'){p.outs_line=Number(rn.handicap)||0;p.outs_over_odds=gO(rn);}}}
+      if(mt.match(/^PITCHER_[A-Z]_TOTAL_STRIKEOUTS$/)){const p=g(mn.replace(/ - Strikeouts$/,''));for(const rn of rs){if((rn.runnerName||'').includes('Over')){p.ks_line=Number(rn.handicap)||0;p.ks_over_odds=gO(rn);}}}
+      if(mt.match(/^PITCHER_[A-Z]_STRIKEOUTS$/)){for(const rn of rs){const x=(rn.runnerName||'').match(/^(.+?)\s+(\d+)\+\s*Strikeouts$/);if(x){const p=g(x[1]);const t=parseInt(x[2]);if(t>=3&&t<=8)p[`ks_alt_${t}plus`]=gO(rn);}}}
+      if(mt.match(/^PITCHING_SPECIALS/)){for(const rn of rs){const x=(rn.runnerName||'').match(/^(.+?)\s+(\d+)\+\s*Strikeouts$/);if(x){const p=g(x[1]);const t=parseInt(x[2]);if(t===9)p.ks_alt_9plus=gO(rn);if(t===10)p.ks_alt_10plus=gO(rn);}}}
+      if(mt.match(/^PITCHER_[A-Z]_OUTS_RECORDED$/)){const p=g(mn.replace(/ Outs Recorded$/,''));for(const rn of rs){if(rn.runnerName==='Over'){p.outs_line=Number(rn.handicap)||0;p.outs_over_odds=gO(rn);}}}
     }
   }catch{}
   return pm;
@@ -115,7 +172,8 @@ async function main(){
   const ins=[];let noT=0;
   for(const r of rg){
     const d=fm(r.name,dff),pr=fm(r.name,allP)||{};
-    const team=d?.team||'',opp=d?.opponent||'';if(!team)noT++;
+    // Use RG team data (real), fall back to DFF
+    const team=r.team||d?.team||'',opp=r.opponent||d?.opponent||'';if(!team)noT++;
     const isP=r.position==='P';
     const pts=Object.keys(pr).length>0?(isP?calcP(pr):calcB(pr)):{projected:0,upside:0};
     ins.push({name:r.name,team,opponent:opp,position:r.position,salary:r.salary,...pr,

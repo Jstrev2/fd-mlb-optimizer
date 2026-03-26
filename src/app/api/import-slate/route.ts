@@ -185,7 +185,7 @@ async function getEventProps(eventId: string): Promise<Map<string, Props>> {
       const runners = (m.runners as Record<string, unknown>[]) || [];
 
       // Strikeouts O/U
-      if (mt === "PITCHER_A_TOTAL_STRIKEOUTS" || mt === "PITCHER_B_TOTAL_STRIKEOUTS") {
+      if (/^PITCHER_[A-Z]_TOTAL_STRIKEOUTS$/.test(mt)) {
         const pitcherName = mn.replace(/ - Strikeouts$/, "").trim();
         const p = getOrCreate(pitcherName);
         for (const r of runners) {
@@ -198,7 +198,7 @@ async function getEventProps(eventId: string): Promise<Map<string, Props>> {
       }
 
       // Alt Strikeouts (tiered)
-      if (mt === "PITCHER_A_STRIKEOUTS" || mt === "PITCHER_B_STRIKEOUTS") {
+      if (/^PITCHER_[A-Z]_STRIKEOUTS$/.test(mt)) {
         for (const r of runners) {
           const rn = (r.runnerName as string) || "";
           const match = rn.match(/^(.+?)\s+(\d+)\+\s*Strikeouts$/);
@@ -217,7 +217,7 @@ async function getEventProps(eventId: string): Promise<Map<string, Props>> {
       }
 
       // Pitching Specials (high-K tiers: 9+, 10+, 11+, 12+)
-      if (mt === "PITCHING_SPECIALS_SB" || mt === "PITCHING_SPECIALS_SB_B") {
+      if (/^PITCHING_SPECIALS/.test(mt)) {
         for (const r of runners) {
           const rn = (r.runnerName as string) || "";
           const match = rn.match(/^(.+?)\s+(\d+)\+\s*Strikeouts$/);
@@ -232,7 +232,7 @@ async function getEventProps(eventId: string): Promise<Map<string, Props>> {
       }
 
       // Outs recorded O/U
-      if (mt === "PITCHER_A_OUTS_RECORDED" || mt === "PITCHER_B_OUTS_RECORDED") {
+      if (/^PITCHER_[A-Z]_OUTS_RECORDED$/.test(mt)) {
         const pitcherName = mn.replace(/ Outs Recorded$/, "").trim();
         const p = getOrCreate(pitcherName);
         for (const r of runners) {
