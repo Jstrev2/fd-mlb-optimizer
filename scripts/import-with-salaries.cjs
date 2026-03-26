@@ -6,7 +6,15 @@ const FD_API = 'https://sbapi.il.sportsbook.fanduel.com/api';
 const AK = 'FhMFpcPWXMeyZxOx';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 const TA = {'Pittsburgh Pirates':'PIT','New York Mets':'NYM','Chicago White Sox':'CWS','Milwaukee Brewers':'MIL','Washington Nationals':'WAS','Chicago Cubs':'CHC','Minnesota Twins':'MIN','Baltimore Orioles':'BAL','Boston Red Sox':'BOS','Cincinnati Reds':'CIN','Los Angeles Angels':'LAA','Houston Astros':'HOU','Tampa Bay Rays':'TB','St. Louis Cardinals':'STL','Texas Rangers':'TEX','Philadelphia Phillies':'PHI','Detroit Tigers':'DET','San Diego Padres':'SD','Los Angeles Dodgers':'LAD','Arizona Diamondbacks':'ARI','Seattle Mariners':'SEA','Cleveland Guardians':'CLE','New York Yankees':'NYY','Toronto Blue Jays':'TOR','Atlanta Braves':'ATL','Colorado Rockies':'COL','San Francisco Giants':'SF','Kansas City Royals':'KC','Oakland Athletics':'OAK','Miami Marlins':'MIA'};
-function o2p(o){if(!o)return 0;return o>0?100/(o+100):Math.abs(o)/(Math.abs(o)+100);}
+function o2p(o){
+  if(!o)return 0;
+  // Raw implied probability
+  const raw=o>0?100/(o+100):Math.abs(o)/(Math.abs(o)+100);
+  // Remove FanDuel vig (~15% overround on player props)
+  // Longshots (+odds) have more vig baked in; favorites (-odds) have less
+  const vigFactor=o>0?(o<500?0.85:0.82):(Math.abs(o)<200?0.93:0.95);
+  return raw*vigFactor;
+}
 function gO(r){return Number(r?.winRunnerOdds?.americanDisplayOdds?.americanOdds)||0;}
 function norm(n){return n.toLowerCase().replace(/\./g,'').replace(/jr\.?$/i,'').replace(/\s+/g,' ').trim();}
 function fm(n,m){if(m.has(n))return m.get(n);const nn=norm(n);for(const[k,v]of m){if(norm(k)===nn)return v;}const l=nn.split(' ').pop();if(l&&l.length>=4){for(const[k,v]of m){if(norm(k).split(' ').pop()===l)return v;}}return null;}
