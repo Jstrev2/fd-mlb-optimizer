@@ -8,126 +8,33 @@ export function oddsToProb(americanOdds: number): number {
 
 // === FANDUEL CONSTRAINTS ===
 export const SALARY_CAP = 35000;
-export const MAX_PER_TEAM = 4; // FanDuel MLB max 4 from same team
+export const MAX_PER_TEAM = 4;
 
 export interface LineupSlot {
   position: string;
   player: Player | null;
 }
 
-function positionFits(playerPos: string, slotPos: string): boolean {
-  if (slotPos === "UTIL") return playerPos !== "P";
-  if (slotPos === "C/1B") return playerPos === "C" || playerPos === "1B";
-  return playerPos === slotPos;
-}
+// === STACK FRAMEWORKS ===
+// Each framework defines how many players from each "group" (team)
+// e.g. [4,4] = two 4-stacks, [4,3,1] = one 4-stack + one 3-stack + 1 solo, etc.
+// These apply to batters only (8 batter slots). Pitcher is separate.
+export const STACK_FRAMEWORKS: { label: string; stacks: number[] }[] = [
+  { label: "No Stack", stacks: [] },
+  { label: "4×4", stacks: [4, 4] },
+  { label: "4×3×1", stacks: [4, 3, 1] },
+  { label: "4×2×2", stacks: [4, 2, 2] },
+  { label: "3×3×2", stacks: [3, 3, 2] },
+  { label: "3×3×1×1", stacks: [3, 3, 1, 1] },
+  { label: "5×3", stacks: [5, 3] },
+  { label: "4×3", stacks: [4, 3] },
+  { label: "3×2×2×1", stacks: [3, 2, 2, 1] },
+];
 
-// === OPTIMIZER ===
 export interface OptimizerConfig {
   mode: "upside" | "projected";
-  excludedTeams: Set<string>;   // teams to exclude (weather, etc)
-  stackTeam: string | null;     // team to stack (force 3-4 batters from this team)
-  stackSize: number;            // how many from stack team (default 4)
-}
-
-export function optimizeLineup(players: Player[], config: OptimizerConfig): LineupSlot[] {
-  const { mode, excludedTeams, stackTeam, stackSize } = config;
-
-  // Filter out excluded teams
-  const pool = players.filter((p) => !excludedTeams.has(p.team));
-
-  const slots: LineupSlot[] = [
-    { position: "P", player: null },
-    { position: "C/1B", player: null },
-    { position: "2B", player: null },
-    { position: "3B", player: null },
-    { position: "SS", player: null },
-    { position: "OF", player: null },
-    { position: "OF", player: null },
-    { position: "OF", player: null },
-    { position: "UTIL", player: null },
-  ];
-
-  const getValue = (p: Player) => mode === "upside" ? p.upside_pts : p.projected_pts;
-
-  // Track used players and team counts
-  const usedIds = new Set<string>();
-  const teamCounts = new Map<string, number>();
-  let remainingSalary = SALARY_CAP;
-
-  const canAdd = (p: Player, slotsLeft: number): boolean => {
-    if (usedIds.has(p.id)) return false;
-    if (p.salary > remainingSalary) return false;
-    // Max per team check
-    const tc = teamCounts.get(p.team) || 0;
-    if (tc >= MAX_PER_TEAM) return false;
-    // Ensure enough salary for remaining slots
-    const minPerSlot = 2500;
-    if ((remainingSalary - p.salary) < (slotsLeft - 1) * minPerSlot) return false;
-    return true;
-  };
-
-  const addPlayer = (slot: LineupSlot, player: Player) => {
-    slot.player = player;
-    usedIds.add(player.id);
-    remainingSalary -= player.salary;
-    teamCounts.set(player.team, (teamCounts.get(player.team) || 0) + 1);
-  };
-
-  // If stacking, pre-select stack players first
-  if (stackTeam) {
-    const stackPlayers = pool
-      .filter((p) => p.team === stackTeam && p.position !== "P")
-      .sort((a, b) => getValue(b) - getValue(a));
-
-    let stackCount = 0;
-    for (const sp of stackPlayers) {
-      if (stackCount >= stackSize) break;
-
-      // Find a positional slot this player fits
-      const openSlot = slots.find(
-        (s) => s.player === null && s.position !== "UTIL" && positionFits(sp.position, s.position)
-      );
-      if (openSlot && canAdd(sp, slots.filter((s) => !s.player).length)) {
-        addPlayer(openSlot, sp);
-        stackCount++;
-        continue;
-      }
-      // Try UTIL
-      const utilSlot = slots.find((s) => s.position === "UTIL" && !s.player);
-      if (utilSlot && sp.position !== "P" && canAdd(sp, slots.filter((s) => !s.player).length)) {
-        addPlayer(utilSlot, sp);
-        stackCount++;
-      }
-    }
-  }
-
-  // Fill remaining positional slots (not UTIL)
-  const positionalSlots = slots.filter((s) => s.player === null && s.position !== "UTIL");
-  for (const slot of positionalSlots) {
-    const emptyCount = slots.filter((s) => !s.player).length;
-    const candidates = pool
-      .filter((p) => positionFits(p.position, slot.position) && canAdd(p, emptyCount))
-      .sort((a, b) => getValue(b) - getValue(a));
-
-    if (candidates.length > 0) {
-      addPlayer(slot, candidates[0]);
-    }
-  }
-
-  // Fill UTIL last - any non-pitcher
-  const utilSlot = slots.find((s) => s.position === "UTIL" && !s.player);
-  if (utilSlot) {
-    const emptyCount = slots.filter((s) => !s.player).length;
-    const candidates = pool
-      .filter((p) => p.position !== "P" && canAdd(p, emptyCount))
-      .sort((a, b) => getValue(b) - getValue(a));
-
-    if (candidates.length > 0) {
-      addPlayer(utilSlot, candidates[0]);
-    }
-  }
-
-  return slots;
+  excludedTeams: Set<string>;
+  stackFramework: number[]; // e.g. [4, 3, 1]
 }
 
 // === MANUAL CALC FUNCTIONS (for add player page) ===
@@ -169,7 +76,6 @@ export function calcBatterPoints(props: BatterProps): { projected: number; upsid
   const runsOverProb = props.runs_over_odds ? oddsToProb(props.runs_over_odds) : 0;
   const walksOverProb = props.walks_over_odds ? oddsToProb(props.walks_over_odds) : 0;
   const sbsOverProb = props.sbs_over_odds ? oddsToProb(props.sbs_over_odds) : 0;
-  const hitsOverProb = props.hits_over_odds ? oddsToProb(props.hits_over_odds) : 0.5;
 
   const expectedTB = props.total_bases_line * (0.5 + tbOverProb * 0.3);
   const tbPoints = expectedTB <= 1 ? expectedTB * 3 : expectedTB <= 2 ? 3 + (expectedTB - 1) * 4.5 : 7.5 + (expectedTB - 2) * 5;
