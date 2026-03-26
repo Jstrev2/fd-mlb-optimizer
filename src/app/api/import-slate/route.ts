@@ -1,3 +1,5 @@
+import { calcBatterPoints as calcBatterV2, calcPitcherPoints as calcPitcherV2 } from "@/lib/scoring";
+import type { BatterProps, PitcherProps } from "@/lib/scoring";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -16,11 +18,6 @@ function getOdds(runner: Record<string, unknown>): number {
   return Number(d?.americanOdds) || 0;
 }
 
-function oddsToProb(odds: number): number {
-  if (!odds) return 0;
-  if (odds > 0) return 100 / (odds + 100);
-  return Math.abs(odds) / (Math.abs(odds) + 100);
-}
 
 // ============ PROP DATA STRUCTURE ============
 interface Props {
@@ -255,126 +252,6 @@ async function getEventProps(eventId: string): Promise<Map<string, Props>> {
 }
 
 // ============ SCORING ENGINE ============
-function calcBatterPoints(p: Props): { projected: number; upside: number } {
-  // === PROJECTED: E[X] = sum of P(X >= k) for each stat tier ===
-  const tb1 = p.hit_odds ? oddsToProb(p.hit_odds) : 0;
-  const tb2 = p.tb_2plus ? oddsToProb(p.tb_2plus) : 0;
-  const tb3 = p.tb_3plus ? oddsToProb(p.tb_3plus) : 0;
-  const tb4 = p.tb_4plus ? oddsToProb(p.tb_4plus) : 0;
-  const tb5 = p.tb_5plus ? oddsToProb(p.tb_5plus) : 0;
-  const expTB = tb1 + tb2 + tb3 + tb4 + tb5;
-  const hitPts = expTB * 3; // Each TB = 3 FD pts (1B=3,2B=6,3B=9,HR=12)
-
-  const rbi1 = p.rbi_odds ? oddsToProb(p.rbi_odds) : 0;
-  const rbi2 = p.rbis_2plus ? oddsToProb(p.rbis_2plus) : 0;
-  const rbi3 = p.rbis_3plus ? oddsToProb(p.rbis_3plus) : 0;
-  const rbi4 = p.rbis_4plus ? oddsToProb(p.rbis_4plus) : 0;
-  const expRBI = rbi1 + rbi2 + rbi3 + rbi4;
-
-  const run1 = p.run_odds ? oddsToProb(p.run_odds) : 0;
-  const run2 = p.runs_2plus ? oddsToProb(p.runs_2plus) : 0;
-  const run3 = p.runs_3plus ? oddsToProb(p.runs_3plus) : 0;
-  const expRun = run1 + run2 + run3;
-
-  const sb1 = p.sb_odds ? oddsToProb(p.sb_odds) : 0;
-  const sb2 = p.sbs_2plus ? oddsToProb(p.sbs_2plus) : 0;
-  const expSB = sb1 + sb2;
-
-  const expBB = 0.35;
-  const projected = hitPts + expRBI * 3.5 + expRun * 3.2 + expBB * 3 + expSB * 6;
-
-  if (!p.hit_odds && !p.tb_2plus && !p.rbi_odds && !p.run_odds) return { projected: 0, upside: 0 };
-
-  // === UPSIDE: integer tier at 20% threshold + confidence bonus ===
-  function upTierConf(tiers: [number, number | null][], ptsPerUnit: number): [number, number] {
-    const probs = tiers.filter(([, o]) => o).map(([k, o]) => [k, oddsToProb(o!)] as const);
-    if (!probs.length) return [0, 0];
-    let bk = 0, bp = 0;
-    for (const [k, p] of probs) { if (p >= 0.20) { bk = k; bp = p; } }
-    if (!bk) return [0, 0];
-    const excess = Math.min((bp - 0.20) / 0.20, 1);
-    return [bk, excess * ptsPerUnit * 0.3];
-  }
-
-  const [upTB, tbB] = upTierConf([[1, p.hit_odds], [2, p.tb_2plus], [3, p.tb_3plus], [4, p.tb_4plus], [5, p.tb_5plus]], 3);
-  const [upRBI, rbiB] = upTierConf([[1, p.rbi_odds], [2, p.rbis_2plus], [3, p.rbis_3plus], [4, p.rbis_4plus]], 3.5);
-  const [upRun, runB] = upTierConf([[1, p.run_odds], [2, p.runs_2plus], [3, p.runs_3plus]], 3.2);
-  const [upSB, sbB] = upTierConf([[1, p.sb_odds], [2, p.sbs_2plus]], 6);
-  const confBonus = tbB + rbiB + runB + sbB;
-
-  let upside = upTB * 3 + upRBI * 3.5 + upRun * 3.2 + expBB * 3 + upSB * 6 + confBonus;
-
-  // HR scenario boost: a HR locks in 4TB+1R+1RBI simultaneously
-  if (p.hr_odds) {
-    const hrProb = oddsToProb(p.hr_odds);
-    if (hrProb >= 0.08) {
-      const hrTB = Math.max(upTB, 4);
-      const hrRBI = Math.max(upRBI, 1);
-      const hrRun = Math.max(upRun, 1);
-      const hrUpside = hrTB * 3 + hrRBI * 3.5 + hrRun * 3.2 + expBB * 3 + upSB * 6;
-      const hrWeight = Math.min(hrProb / 0.25, 1) * 0.4;
-      upside = upside * (1 - hrWeight) + hrUpside * hrWeight;
-    }
-  }
-
-  return {
-    projected: Math.round(projected * 10) / 10,
-    upside: Math.round(upside * 10) / 10,
-  };
-}
-
-function calcPitcherPoints(p: Props): { projected: number; upside: number } {
-  const ksLine = p.ks_line || 5;
-  const ksOverProb = p.ks_over_odds ? oddsToProb(p.ks_over_odds) : 0.5;
-  // Expected Ks: line + adjustment based on over probability
-  const expectedKs = ksLine + (ksOverProb - 0.5) * 2;
-
-  const outsLine = p.outs_line || 16;
-  const outsOverProb = p.outs_over_odds ? oddsToProb(p.outs_over_odds) : 0.5;
-  // Expected outs: if line is 16.5 and over is -110, expected ~ line + (overProb - 0.5) * 2
-  const expectedOuts = outsLine + (outsOverProb - 0.5) * 2;
-
-  // Rough ER estimate based on outs (more outs = more IP = slightly more ER but also QS)
-  const expectedIP = expectedOuts / 3;
-  const expectedER = expectedIP * 0.4; // ~3.6 ERA average
-
-  // Win prob from moneyline or estimate
-  const winProb = p.win_odds ? oddsToProb(p.win_odds) : 0.45;
-  // QS = 6+ IP (18+ outs) and <= 3 ER. Estimate based on outs line.
-  const qsProb = expectedOuts >= 18 ? 0.50 : expectedOuts >= 16 ? 0.35 : expectedOuts >= 14 ? 0.20 : 0.10;
-
-  // FD Pitching: W=6, QS=4, ER=-3, K=3, IP(each out)=1 -- wait, FD scores IP as 3pts per full IP
-  // Actually FD scores: each inning pitched = 3 pts, so each out = 1 pt. That IS correct.
-  // But expectedOuts formula was off. Fix: expectedOuts should use the line directly.
-  const projected = expectedKs * 3 + expectedOuts * 1 + expectedER * -3 + winProb * 6 + qsProb * 4;
-
-  // Upside: ~90th percentile start. Great pitcher day = 50-70 FD pts.
-  // Use alt K tiers to find realistic ceiling Ks.
-  // Upside Ks: interpolated 20% probability crossing on alt K ladder
-  let upsideKs = ksLine + 1, kBonus = 0;
-  const kTiers: [number, number|null][] = [[3,p.ks_alt_3plus],[4,p.ks_alt_4plus],[5,p.ks_alt_5plus],[6,p.ks_alt_6plus],[7,p.ks_alt_7plus],[8,p.ks_alt_8plus],[9,p.ks_alt_9plus],[10,p.ks_alt_10plus]];
-  const kProbs = kTiers.filter(([,o]) => o).map(([k, o]) => [k, oddsToProb(o!)] as const);
-  if (kProbs.length) {
-    let bk = ksLine + 1, bp = 0, np = 0;
-    for (let i = 0; i < kProbs.length; i++) {
-      if (kProbs[i][1] >= 0.20) { bk = kProbs[i][0]; bp = kProbs[i][1]; np = i + 1 < kProbs.length ? kProbs[i + 1][1] : 0; }
-    }
-    if (bp > 0.20 && np < 0.20) upsideKs = bk + (bp - 0.20) / (bp - np);
-    else upsideKs = bk;
-  }
-
-  const upsideOuts = Math.min(outsLine + 3, 21); // cap at 7 IP
-  const upsideER = Math.max(0, expectedER - 1.5);
-  const upsideWin = Math.min(1, winProb + 0.15);
-  const upsideQS = expectedIP >= 4.5 ? Math.min(1, qsProb + 0.25) : qsProb;
-
-  const upside = upsideKs * 3 + kBonus + upsideOuts * 1 + upsideER * -3 + upsideWin * 6 + upsideQS * 4;
-
-  return {
-    projected: Math.round(projected * 10) / 10,
-    upside: Math.round(upside * 10) / 10,
-  };
-}
 
 // ============ DFF SALARY SCRAPER ============
 interface DFFPlayer { name: string; position: string; salary: number; team: string; opponent: string; dff_projected: number; }
@@ -459,7 +336,7 @@ export async function POST() {
       const props = findPropMatch(dff.name, allProps);
       const isPitcher = dff.position === "P";
       const pts = props
-        ? (isPitcher ? calcPitcherPoints(props) : calcBatterPoints(props))
+        ? (isPitcher ? calcPitcherV2(props as unknown as PitcherProps) : calcBatterV2(props as unknown as BatterProps))
         : { projected: dff.dff_projected, upside: Math.round(dff.dff_projected * 1.3 * 10) / 10 };
 
       return {
@@ -506,7 +383,7 @@ export async function POST() {
         // Determine if pitcher or batter
         const isPitcher = props.ks_line !== null || props.ks_over_odds !== null;
         const guessTeam = isPitcher ? awayAbbr : ""; // rough guess
-        const pts = isPitcher ? calcPitcherPoints(props) : calcBatterPoints(props);
+        const pts = isPitcher ? calcPitcherV2(props as unknown as PitcherProps) : calcBatterV2(props as unknown as BatterProps);
 
         // Determine position from prop data
         let position = "OF"; // default for batters

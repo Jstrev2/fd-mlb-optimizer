@@ -6,15 +6,7 @@ const FD_API = 'https://sbapi.il.sportsbook.fanduel.com/api';
 const AK = 'FhMFpcPWXMeyZxOx';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 const TA = {'Pittsburgh Pirates':'PIT','New York Mets':'NYM','Chicago White Sox':'CWS','Milwaukee Brewers':'MIL','Washington Nationals':'WAS','Chicago Cubs':'CHC','Minnesota Twins':'MIN','Baltimore Orioles':'BAL','Boston Red Sox':'BOS','Cincinnati Reds':'CIN','Los Angeles Angels':'LAA','Houston Astros':'HOU','Tampa Bay Rays':'TB','St. Louis Cardinals':'STL','Texas Rangers':'TEX','Philadelphia Phillies':'PHI','Detroit Tigers':'DET','San Diego Padres':'SD','Los Angeles Dodgers':'LAD','Arizona Diamondbacks':'ARI','Seattle Mariners':'SEA','Cleveland Guardians':'CLE','New York Yankees':'NYY','Toronto Blue Jays':'TOR','Atlanta Braves':'ATL','Colorado Rockies':'COL','San Francisco Giants':'SF','Kansas City Royals':'KC','Oakland Athletics':'OAK','Miami Marlins':'MIA'};
-function o2p(o){
-  if(!o)return 0;
-  // Raw implied probability
-  const raw=o>0?100/(o+100):Math.abs(o)/(Math.abs(o)+100);
-  // Remove FanDuel vig (~15% overround on player props)
-  // Longshots (+odds) have more vig baked in; favorites (-odds) have less
-  const vigFactor=o>0?(o<500?0.85:0.82):(Math.abs(o)<200?0.93:0.95);
-  return raw*vigFactor;
-}
+const { calcB, calcP, devigOneSided: o2p } = require("./scoring.cjs");
 function gO(r){return Number(r?.winRunnerOdds?.americanDisplayOdds?.americanOdds)||0;}
 function norm(n){return n.toLowerCase().replace(/\./g,'').replace(/jr\.?$/i,'').replace(/\s+/g,' ').trim();}
 function fm(n,m){if(m.has(n))return m.get(n);const nn=norm(n);for(const[k,v]of m){if(norm(k)===nn)return v;}const l=nn.split(' ').pop();if(l&&l.length>=4){for(const[k,v]of m){if(norm(k).split(' ').pop()===l)return v;}}return null;}
@@ -143,115 +135,6 @@ async function getProps(eid){
   return pm;
 }
 
-function calcB(p){
-  // === PROJECTED: E[X] = sum of P(X >= k) for each stat tier ===
-  // This is a mathematical identity for non-negative integer random variables.
-
-  // Expected Total Bases (each TB = 3 FD pts since 1B=3, 2B=6, 3B=9, HR=12)
-  const tb1=p.hit_odds?o2p(p.hit_odds):0; // P(1+ TB) ≈ P(hit)
-  const tb2=p.tb_2plus?o2p(p.tb_2plus):0;
-  const tb3=p.tb_3plus?o2p(p.tb_3plus):0;
-  const tb4=p.tb_4plus?o2p(p.tb_4plus):0;
-  const tb5=p.tb_5plus?o2p(p.tb_5plus):0;
-  const expTB=tb1+tb2+tb3+tb4+tb5;
-  const hitPts=expTB*3; // Each TB = 3 FD pts
-
-  // Expected RBIs
-  const rbi1=p.rbi_odds?o2p(p.rbi_odds):0;
-  const rbi2=p.rbis_2plus?o2p(p.rbis_2plus):0;
-  const rbi3=p.rbis_3plus?o2p(p.rbis_3plus):0;
-  const rbi4=p.rbis_4plus?o2p(p.rbis_4plus):0;
-  const expRBI=rbi1+rbi2+rbi3+rbi4;
-
-  // Expected Runs
-  const run1=p.run_odds?o2p(p.run_odds):0;
-  const run2=p.runs_2plus?o2p(p.runs_2plus):0;
-  const run3=p.runs_3plus?o2p(p.runs_3plus):0;
-  const expRun=run1+run2+run3;
-
-  // Expected SBs
-  const sb1=p.sb_odds?o2p(p.sb_odds):0;
-  const sb2=p.sbs_2plus?o2p(p.sbs_2plus):0;
-  const expSB=sb1+sb2;
-
-  // BB/HBP: no prop data, estimate ~0.35 combined per game
-  const expBB=0.35;
-
-  const proj=hitPts + expRBI*3.5 + expRun*3.2 + expBB*3 + expSB*6;
-
-  // If we have zero tier data, projected=0 (don't fake it)
-  if(!p.hit_odds&&!p.tb_2plus&&!p.rbi_odds&&!p.run_odds) return{projected:0,upside:0};
-
-  // === UPSIDE: integer tier at 20% threshold + confidence bonus for tiebreaking ===
-  // Tier = highest count where P(X+) >= 20% (your "good game" scenario)
-  // Confidence bonus = how far above 20% you are, worth up to 30% of one extra unit
-  // This avoids inflating speed/discrete stats (SBs, runs) with fractional nonsense
-  function upTierConf(tiers,ptsPerUnit){
-    const probs=tiers.filter(([,o])=>o).map(([k,o])=>[k,o2p(o)]);
-    if(!probs.length)return[0,0];
-    let bk=0,bp=0;
-    for(const[k,p]of probs){if(p>=0.20){bk=k;bp=p;}}
-    if(!bk)return[0,0];
-    const excess=Math.min((bp-0.20)/0.20,1);
-    return[bk,excess*ptsPerUnit*0.3];
-  }
-
-  const[upTB,tbB]=upTierConf([[1,p.hit_odds],[2,p.tb_2plus],[3,p.tb_3plus],[4,p.tb_4plus],[5,p.tb_5plus]],3);
-  const[upRBI,rbiB]=upTierConf([[1,p.rbi_odds],[2,p.rbis_2plus],[3,p.rbis_3plus],[4,p.rbis_4plus]],3.5);
-  const[upRun,runB]=upTierConf([[1,p.run_odds],[2,p.runs_2plus],[3,p.runs_3plus]],3.2);
-  const[upSB,sbB]=upTierConf([[1,p.sb_odds],[2,p.sbs_2plus]],6);
-  const confBonus=tbB+rbiB+runB+sbB;
-
-  let upside=upTB*3 + upRBI*3.5 + upRun*3.2 + expBB*3 + upSB*6 + confBonus;
-
-  // HR scenario boost: a HR locks in 4TB+1R+1RBI simultaneously
-  // Blend HR-scenario upside with independent-stat upside, weighted by HR probability
-  if(p.hr_odds){
-    const hrProb=o2p(p.hr_odds);
-    if(hrProb>=0.08){
-      // HR game floor: 4TB(12pts) + guaranteed run(3.2) + guaranteed RBI(3.5) + BB(1.05)
-      // Plus any additional stats beyond the HR minimum
-      const hrTB=Math.max(upTB,4);
-      const hrRBI=Math.max(upRBI,1);
-      const hrRun=Math.max(upRun,1);
-      const hrUpside=hrTB*3 + hrRBI*3.5 + hrRun*3.2 + expBB*3 + upSB*6;
-      // Blend: weight HR scenario by its probability relative to ~25% threshold
-      // At 25%+ HR prob, HR scenario dominates; at 8% it's a small nudge
-      const hrWeight=Math.min(hrProb/0.25,1)*0.4; // max 40% weight to HR scenario
-      upside=upside*(1-hrWeight)+hrUpside*hrWeight;
-    }
-  }
-
-  return{projected:Math.round(proj*10)/10,upside:Math.round(upside*10)/10};
-}
-
-function calcP(p){
-  const kl=p.ks_line||5,kop=p.ks_over_odds?o2p(p.ks_over_odds):.5;
-  // Expected Ks: use O/U line + lean. Also cross-check with alt tiers if available.
-  let ek=kl+(kop-.5)*1.5;
-  // If we have alt tiers, compute weighted expected from the ladder
-  const kTiersE=[[3,p.ks_alt_3plus],[4,p.ks_alt_4plus],[5,p.ks_alt_5plus],[6,p.ks_alt_6plus],[7,p.ks_alt_7plus],[8,p.ks_alt_8plus],[9,p.ks_alt_9plus],[10,p.ks_alt_10plus]];
-  const validTiers=kTiersE.filter(([,o])=>o).map(([k,o])=>[k,o2p(o)]);
-  if(validTiers.length>=3){
-    // E[K] ≈ sum of P(K+) for each tier (since K = sum of indicator variables for each threshold)
-    let tierExp=0;for(const[,cp]of validTiers)tierExp+=cp;
-    // Add base (below lowest tier)
-    const lowestTier=validTiers[0][0];
-    tierExp+=lowestTier-1; // assume ~100% chance of getting at least (lowest-1) Ks
-    ek=Math.max(ek,tierExp*0.85); // slight discount, use whichever is higher
-  }
-  const ol=p.outs_line||16,oop=p.outs_over_odds?o2p(p.outs_over_odds):.5,eo=ol+(oop-.5)*2;
-  const eIP=eo/3,eER=eIP*.4,wp=p.win_odds?o2p(p.win_odds):.45;
-  const qp=eo>=18?.50:eo>=16?.35:eo>=14?.20:.10;
-  const proj=ek*3+eo*1+eER*-3+wp*6+qp*4;
-  // Upside Ks: highest alt K tier with >=20% probability + confidence bonus
-  let uk=kl+1,kBonus=0;
-  const kTiers=[[3,p.ks_alt_3plus],[4,p.ks_alt_4plus],[5,p.ks_alt_5plus],[6,p.ks_alt_6plus],[7,p.ks_alt_7plus],[8,p.ks_alt_8plus],[9,p.ks_alt_9plus],[10,p.ks_alt_10plus]];
-  const kProbs=kTiers.filter(([,o])=>o).map(([k,o])=>[k,o2p(o)]);
-  if(kProbs.length){let bp=0;for(const[k,p2]of kProbs){if(p2>=0.20){uk=k;bp=p2;}}if(bp>0.20){const excess=Math.min((bp-0.20)/0.20,1);kBonus=excess*3*0.3;}}
-  const uo=Math.min(ol+3,21),ue=Math.max(0,eER-1.5),uw=Math.min(1,wp+.15),uq=eIP>=4.5?Math.min(1,qp+.25):qp;
-  return{projected:Math.round(proj*10)/10,upside:Math.round((uk*3+kBonus+uo*1+ue*-3+uw*6+uq*4)*10)/10};
-}
 
 async function main(){
   const[rg,dff,evs]=await Promise.all([scrapeRG(),scrapeDFF(),getEvents()]);
