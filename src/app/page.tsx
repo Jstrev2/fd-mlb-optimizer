@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo } from "react";
 import { supabase, Player } from "@/lib/supabase";
 import BottomNav from "@/components/BottomNav";
 import Link from "next/link";
+import PlayerDetail from "@/components/PlayerDetail";
 import { Download, Loader2, Search, ChevronDown, X, Calendar } from "lucide-react";
 
 type SortKey = "upside_pts" | "projected_pts" | "salary" | "name" | "value";
@@ -23,6 +24,7 @@ export default function PlayersPage() {
   const [slates, setSlates] = useState<Slate[]>([]);
   const [selectedSlate, setSelectedSlate] = useState<string>("all");
   const [slateDropOpen, setSlateDropOpen] = useState(false);
+  const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
 
   const fetchPlayers = async () => {
     setLoading(true);
@@ -249,11 +251,11 @@ export default function PlayersPage() {
                 {posFilter === "all" && pitchers.length > 0 && (
                   <tr><td colSpan={8} className="px-2 pt-2 pb-0.5 text-[9px] font-bold text-zinc-600 uppercase tracking-widest bg-zinc-950/40">Pitchers ({pitchers.length})</td></tr>
                 )}
-                {(posFilter === "all" ? pitchers : []).map(p => <PlayerRow key={p.id} p={p} fmtSal={fmtSal} fmtVal={fmtVal} />)}
+                {(posFilter === "all" ? pitchers : []).map(p => <PlayerRow key={p.id} p={p} fmtSal={fmtSal} fmtVal={fmtVal} onClick={() => setSelectedPlayer(p)} />)}
                 {posFilter === "all" && batters.length > 0 && pitchers.length > 0 && (
                   <tr><td colSpan={8} className="px-2 pt-3 pb-0.5 text-[9px] font-bold text-zinc-600 uppercase tracking-widest bg-zinc-950/40">Batters ({batters.length})</td></tr>
                 )}
-                {(posFilter === "all" ? batters : filtered).map(p => <PlayerRow key={p.id} p={p} fmtSal={fmtSal} fmtVal={fmtVal} />)}
+                {(posFilter === "all" ? batters : filtered).map(p => <PlayerRow key={p.id} p={p} fmtSal={fmtSal} fmtVal={fmtVal} onClick={() => setSelectedPlayer(p)} />)}
                 {filtered.length === 0 && <tr><td colSpan={8} className="text-center py-10 text-zinc-600">No players found</td></tr>}
               </tbody>
             </table>
@@ -261,12 +263,13 @@ export default function PlayersPage() {
         </div>
       )}
 
+      {selectedPlayer && <PlayerDetail player={selectedPlayer} onClose={() => setSelectedPlayer(null)} />}
       <BottomNav />
     </main>
   );
 }
 
-function PlayerRow({ p, fmtSal, fmtVal }: { p: Player; fmtSal: (s: number) => string; fmtVal: (p: Player) => string }) {
+function PlayerRow({ p, fmtSal, fmtVal, onClick }: { p: Player; fmtSal: (s: number) => string; fmtVal: (p: Player) => string; onClick: () => void }) {
   const isPitcher = p.position === "P";
   const val = fmtVal(p);
   return (
@@ -277,7 +280,7 @@ function PlayerRow({ p, fmtSal, fmtVal }: { p: Player; fmtSal: (s: number) => st
         </span>
       </td>
       <td className="py-1.5 px-2">
-        <div className="font-semibold text-zinc-200 group-hover:text-white transition-colors truncate max-w-[130px] sm:max-w-[200px] text-[12px]">{p.name}</div>
+        <div className="font-semibold text-zinc-200 group-hover:text-white transition-colors truncate max-w-[130px] sm:max-w-[200px] text-[12px] cursor-pointer hover:text-emerald-400" onClick={onClick}>{p.name}</div>
         <div className="text-[9px] text-zinc-600 sm:hidden">{p.team} vs {p.opponent}</div>
       </td>
       <td className="py-1.5 px-2 text-right font-mono text-zinc-400 text-[11px]">{fmtSal(p.salary)}</td>
