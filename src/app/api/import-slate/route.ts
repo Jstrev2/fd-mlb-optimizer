@@ -167,7 +167,7 @@ async function getEventProps(eventId: string): Promise<Map<string, Props>> {
         const name = (runner.runnerName as string) || "";
         if (!name || name === "Over" || name === "Under") continue;
         const p = getOrCreate(name);
-        (p as Record<string, number | null>)[field] = getOdds(runner);
+        (p as unknown as Record<string, number | null>)[field] = getOdds(runner);
       }
     }
   } catch { /* skip */ }
