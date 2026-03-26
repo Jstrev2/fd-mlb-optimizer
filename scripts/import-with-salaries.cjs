@@ -68,7 +68,7 @@ async function scrapeRG(){
       const isAway=teamState==='awayPitcher'||teamState==='awayBatters';
       const team=isAway?currentAway:currentHome;
       const opp=isAway?currentHome:currentAway;
-      players.push({name:m1[1].trim(),position:m1[2].split('/')[0],salary:Math.round(parseFloat(m1[3])*1000),team,opponent:opp});
+      players.push({name:m1[1].trim(),position:m1[2],salary:Math.round(parseFloat(m1[3])*1000),team,opponent:opp});
       if(teamState==='awayPitcher')teamState='awayBatters';
       if(teamState==='homePitcher')teamState='homeBatters';
       continue;
@@ -174,14 +174,25 @@ function calcB(p){
   // If we have zero tier data, projected=0 (don't fake it)
   if(!p.hit_odds&&!p.tb_2plus&&!p.rbi_odds&&!p.run_odds) return{projected:0,upside:0};
 
-  // === UPSIDE: 20% cumulative threshold for each stat tier ===
-  // Find highest tier where P(X+) >= 20% — roughly a 1-in-5 "good game"
-  function upTier(tiers){let best=0;for(const[k,odds]of tiers){if(odds&&o2p(odds)>=0.20)best=k;}return best;}
+  // === UPSIDE: interpolated 20% probability crossing point per stat ===
+  // Find the highest tier with >=20% prob, then interpolate between it and the next tier
+  // This gives smooth granularity: 28% on 4+ TB rates higher than 21% on 4+ TB
+  function upInterp(tiers){
+    const probs=tiers.filter(([,o])=>o).map(([k,o])=>[k,o2p(o)]);
+    if(!probs.length)return 0;
+    let bestK=0,bestP=0,nextP=0;
+    for(let i=0;i<probs.length;i++){
+      if(probs[i][1]>=0.20){bestK=probs[i][0];bestP=probs[i][1];nextP=i+1<probs.length?probs[i+1][1]:0;}
+    }
+    if(!bestK)return 0;
+    if(bestP>0.20&&nextP<0.20){return bestK+(bestP-0.20)/(bestP-nextP);}
+    return bestK;
+  }
 
-  const upTB=upTier([[1,p.hit_odds],[2,p.tb_2plus],[3,p.tb_3plus],[4,p.tb_4plus],[5,p.tb_5plus]]);
-  const upRBI=upTier([[1,p.rbi_odds],[2,p.rbis_2plus],[3,p.rbis_3plus],[4,p.rbis_4plus]]);
-  const upRun=upTier([[1,p.run_odds],[2,p.runs_2plus],[3,p.runs_3plus]]);
-  const upSB=upTier([[1,p.sb_odds],[2,p.sbs_2plus]]);
+  const upTB=upInterp([[1,p.hit_odds],[2,p.tb_2plus],[3,p.tb_3plus],[4,p.tb_4plus],[5,p.tb_5plus]]);
+  const upRBI=upInterp([[1,p.rbi_odds],[2,p.rbis_2plus],[3,p.rbis_3plus],[4,p.rbis_4plus]]);
+  const upRun=upInterp([[1,p.run_odds],[2,p.runs_2plus],[3,p.runs_3plus]]);
+  const upSB=upInterp([[1,p.sb_odds],[2,p.sbs_2plus]]);
 
   const upside=upTB*3 + upRBI*3.5 + upRun*3.2 + expBB*3 + upSB*6;
 
@@ -207,10 +218,11 @@ function calcP(p){
   const eIP=eo/3,eER=eIP*.4,wp=p.win_odds?o2p(p.win_odds):.45;
   const qp=eo>=18?.50:eo>=16?.35:eo>=14?.20:.10;
   const proj=ek*3+eo*1+eER*-3+wp*6+qp*4;
-  // Upside Ks: walk the alt K ladder, find highest tier with >=20% cumulative prob
+  // Upside Ks: interpolated 20% probability crossing on alt K ladder
   let uk=kl+1;
   const kTiers=[[3,p.ks_alt_3plus],[4,p.ks_alt_4plus],[5,p.ks_alt_5plus],[6,p.ks_alt_6plus],[7,p.ks_alt_7plus],[8,p.ks_alt_8plus],[9,p.ks_alt_9plus],[10,p.ks_alt_10plus]];
-  for(const[k,odds]of kTiers){if(odds&&o2p(odds)>=0.20)uk=k;}
+  const kProbs=kTiers.filter(([,o])=>o).map(([k,o])=>[k,o2p(o)]);
+  if(kProbs.length){let bk=kl+1,bp=0,np=0;for(let i=0;i<kProbs.length;i++){if(kProbs[i][1]>=0.20){bk=kProbs[i][0];bp=kProbs[i][1];np=i+1<kProbs.length?kProbs[i+1][1]:0;}}if(bp>0.20&&np<0.20)uk=bk+(bp-0.20)/(bp-np);else uk=bk;}
   const uo=Math.min(ol+3,21),ue=Math.max(0,eER-1.5),uw=Math.min(1,wp+.15),uq=eIP>=4.5?Math.min(1,qp+.25):qp;
   return{projected:Math.round(proj*10)/10,upside:Math.round((uk*3+uo*1+ue*-3+uw*6+uq*4)*10)/10};
 }

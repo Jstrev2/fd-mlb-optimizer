@@ -48,7 +48,7 @@ export default function PlayersPage() {
   };
 
   const positions = ["all", "P", "C", "1B", "2B", "3B", "SS", "OF"];
-  const filtered = filter === "all" ? players : players.filter((p) => p.position === filter);
+  const filtered = filter === "all" ? players : players.filter((p) => p.position.split("/").includes(filter) || p.position === filter);
   const pitchers = filtered.filter((p) => p.position === "P");
   const batters = filtered.filter((p) => p.position !== "P");
 
@@ -82,7 +82,7 @@ export default function PlayersPage() {
       {/* Position filters */}
       <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1">
         {positions.map((pos) => {
-          const count = pos === "all" ? players.length : players.filter((p) => p.position === pos).length;
+          const count = pos === "all" ? players.length : players.filter((p) => p.position.split("/").includes(pos) || p.position === pos).length;
           return (
             <button key={pos} onClick={() => setFilter(pos)}
               className={`px-3 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${filter === pos ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40" : "text-zinc-500 border border-white/10"}`}>

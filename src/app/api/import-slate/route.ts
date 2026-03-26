@@ -285,17 +285,23 @@ function calcBatterPoints(p: Props): { projected: number; upside: number } {
 
   if (!p.hit_odds && !p.tb_2plus && !p.rbi_odds && !p.run_odds) return { projected: 0, upside: 0 };
 
-  // === UPSIDE: 20% cumulative threshold per stat tier ===
-  function upTier(tiers: [number, number | null][]): number {
-    let best = 0;
-    for (const [k, odds] of tiers) { if (odds && oddsToProb(odds) >= 0.20) best = k; }
-    return best;
+  // === UPSIDE: interpolated 20% probability crossing point per stat ===
+  function upInterp(tiers: [number, number | null][]): number {
+    const probs = tiers.filter(([, o]) => o).map(([k, o]) => [k, oddsToProb(o!)] as const);
+    if (!probs.length) return 0;
+    let bestK = 0, bestP = 0, nextP = 0;
+    for (let i = 0; i < probs.length; i++) {
+      if (probs[i][1] >= 0.20) { bestK = probs[i][0]; bestP = probs[i][1]; nextP = i + 1 < probs.length ? probs[i + 1][1] : 0; }
+    }
+    if (!bestK) return 0;
+    if (bestP > 0.20 && nextP < 0.20) { return bestK + (bestP - 0.20) / (bestP - nextP); }
+    return bestK;
   }
 
-  const upTB = upTier([[1, p.hit_odds], [2, p.tb_2plus], [3, p.tb_3plus], [4, p.tb_4plus], [5, p.tb_5plus]]);
-  const upRBI = upTier([[1, p.rbi_odds], [2, p.rbis_2plus], [3, p.rbis_3plus], [4, p.rbis_4plus]]);
-  const upRun = upTier([[1, p.run_odds], [2, p.runs_2plus], [3, p.runs_3plus]]);
-  const upSB = upTier([[1, p.sb_odds], [2, p.sbs_2plus]]);
+  const upTB = upInterp([[1, p.hit_odds], [2, p.tb_2plus], [3, p.tb_3plus], [4, p.tb_4plus], [5, p.tb_5plus]]);
+  const upRBI = upInterp([[1, p.rbi_odds], [2, p.rbis_2plus], [3, p.rbis_3plus], [4, p.rbis_4plus]]);
+  const upRun = upInterp([[1, p.run_odds], [2, p.runs_2plus], [3, p.runs_3plus]]);
+  const upSB = upInterp([[1, p.sb_odds], [2, p.sbs_2plus]]);
 
   const upside = upTB * 3 + upRBI * 3.5 + upRun * 3.2 + expBB * 3 + upSB * 6;
 
@@ -332,10 +338,18 @@ function calcPitcherPoints(p: Props): { projected: number; upside: number } {
 
   // Upside: ~90th percentile start. Great pitcher day = 50-70 FD pts.
   // Use alt K tiers to find realistic ceiling Ks.
-  // Upside Ks: walk the alt K ladder, find highest tier with >=20% cumulative prob
+  // Upside Ks: interpolated 20% probability crossing on alt K ladder
   let upsideKs = ksLine + 1;
   const kTiers: [number, number|null][] = [[3,p.ks_alt_3plus],[4,p.ks_alt_4plus],[5,p.ks_alt_5plus],[6,p.ks_alt_6plus],[7,p.ks_alt_7plus],[8,p.ks_alt_8plus],[9,p.ks_alt_9plus],[10,p.ks_alt_10plus]];
-  for (const [k, odds] of kTiers) { if (odds && oddsToProb(odds) >= 0.20) upsideKs = k; }
+  const kProbs = kTiers.filter(([,o]) => o).map(([k, o]) => [k, oddsToProb(o!)] as const);
+  if (kProbs.length) {
+    let bk = ksLine + 1, bp = 0, np = 0;
+    for (let i = 0; i < kProbs.length; i++) {
+      if (kProbs[i][1] >= 0.20) { bk = kProbs[i][0]; bp = kProbs[i][1]; np = i + 1 < kProbs.length ? kProbs[i + 1][1] : 0; }
+    }
+    if (bp > 0.20 && np < 0.20) upsideKs = bk + (bp - 0.20) / (bp - np);
+    else upsideKs = bk;
+  }
 
   const upsideOuts = Math.min(outsLine + 3, 21); // cap at 7 IP
   const upsideER = Math.max(0, expectedER - 1.5);
@@ -376,7 +390,7 @@ async function getDFFPlayers(): Promise<DFFPlayer[]> {
 
   const batterRegex = /(?:^|\n)(C(?:\/OF)?|1B(?:\/1B)?|2B(?:\/(?:SS|OF|2B))?|3B(?:\/(?:2B|3B))?|SS(?:\/SS)?|OF(?:\/OF)?)\n([\w][\w\s.'-]+?)\s*(?:DTD\s*)?\n?•\s*\([LRS]\)\n\$\n?([\d.]+)k\n(?:YES|EXP\.)\n(\w{2,3})\n(\w{2,3})\n(\d+)\s*(?:✓)?\n([\d.]+)/gm;
   while ((match = batterRegex.exec(text)) !== null) {
-    players.push({ name: match[2].trim(), position: match[1].split("/")[0], salary: Math.round(parseFloat(match[3]) * 1000), team: match[4], opponent: match[5], dff_projected: parseFloat(match[7]) || 0 });
+    players.push({ name: match[2].trim(), position: match[1], salary: Math.round(parseFloat(match[3]) * 1000), team: match[4], opponent: match[5], dff_projected: parseFloat(match[7]) || 0 });
   }
 
   return players;

@@ -6,8 +6,9 @@ const SLOT_POSITIONS = ["P", "C/1B", "2B", "3B", "SS", "OF", "OF", "OF", "UTIL"]
 
 function positionFits(playerPos: string, slotPos: string): boolean {
   if (slotPos === "UTIL") return playerPos !== "P";
-  if (slotPos === "C/1B") return playerPos === "C" || playerPos === "1B";
-  return playerPos === slotPos;
+  const playerPositions = playerPos.split("/");
+  if (slotPos === "C/1B") return playerPositions.includes("C") || playerPositions.includes("1B");
+  return playerPositions.includes(slotPos);
 }
 
 // Pre-filter: for each slot, get eligible players sorted by value
