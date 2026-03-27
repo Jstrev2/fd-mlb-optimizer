@@ -74,14 +74,14 @@ export default function PlayersPage() {
     setImporting(true);
     setImportStatus("Starting import...");
     try {
-      const res = await fetch("http://178.156.255.228:3847/api/import", { method: "POST" });
+      const res = await fetch("/api/import-slate", { method: "POST" });
       const data = await res.json();
       if (data.error) { setImportStatus("Error: " + data.error); setImporting(false); return; }
       setImportStatus("Running pipeline (slates → odds → scores)...");
       
       // Poll status until done
       const poll = async () => {
-        const sr = await fetch("http://178.156.255.228:3847/api/status");
+        const sr = await fetch("/api/import-slate");
         const st = await sr.json();
         if (st.importing) {
           setTimeout(poll, 3000);
