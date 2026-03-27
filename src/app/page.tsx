@@ -68,15 +68,38 @@ export default function PlayersPage() {
     return unsub;
   }, []);
 
+  const [importStatus, setImportStatus] = useState<string>("");
+  
   const loadSlate = async () => {
     setImporting(true);
+    setImportStatus("Starting import...");
     try {
-      const res = await fetch("/api/import-slate", { method: "POST" });
+      const res = await fetch("http://178.156.255.228:3847/api/import", { method: "POST" });
       const data = await res.json();
-      if (data.error) alert("Import error: " + data.error);
-      else { fetchPlayers(); fetchSlates(); }
-    } catch { alert("Failed to import"); }
-    setImporting(false);
+      if (data.error) { setImportStatus("Error: " + data.error); setImporting(false); return; }
+      setImportStatus("Running pipeline (slates → odds → scores)...");
+      
+      // Poll status until done
+      const poll = async () => {
+        const sr = await fetch("http://178.156.255.228:3847/api/status");
+        const st = await sr.json();
+        if (st.importing) {
+          setTimeout(poll, 3000);
+        } else if (st.lastResult) {
+          setImportStatus(`✅ ${st.lastResult.players} players · ${st.lastResult.withProps} w/props`);
+          fetchPlayers();
+          fetchSlates();
+          setImporting(false);
+        } else {
+          setImportStatus("Done");
+          setImporting(false);
+        }
+      };
+      setTimeout(poll, 5000); // first poll after 5s
+    } catch (e) {
+      setImportStatus("Failed to reach import server");
+      setImporting(false);
+    }
   };
 
   // Current slate info
@@ -156,6 +179,11 @@ export default function PlayersPage() {
           <Link href="/players/add" className="px-2.5 py-1.5 bg-blue-500/15 border border-blue-500/30 rounded-lg text-xs font-bold text-blue-400 hover:bg-blue-500/25 transition-all">+</Link>
         </div>
       </div>
+      {importStatus && (
+        <div className={`text-[11px] px-3 py-1.5 rounded-lg mb-2 ${importStatus.startsWith("✅") ? "bg-emerald-500/10 text-emerald-400" : importStatus.startsWith("Error") || importStatus.startsWith("Failed") ? "bg-red-500/10 text-red-400" : "bg-zinc-800 text-zinc-400"}`}>
+          {importStatus}
+        </div>
+      )}
 
       {/* Slate Selector */}
       <div className="relative mb-3">
