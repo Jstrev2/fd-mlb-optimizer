@@ -6,7 +6,8 @@ import { getSelectedSlate, subscribeSlate } from "@/lib/slateContext";
 import { solve } from "@/lib/optimizer";
 import BottomNav from "@/components/BottomNav";
 import { motion } from "framer-motion";
-import { Zap, DollarSign, TrendingUp, Target, CloudOff, Layers, Loader2, Cpu } from "lucide-react";
+import { Zap, DollarSign, TrendingUp, Target, CloudOff, Layers, Loader2, Cpu, ChevronDown, Calendar } from "lucide-react";
+import { setSelectedSlate as persistSlate } from "@/lib/slateContext";
 
 export default function LineupPage() {
   const [players, setPlayers] = useState<Player[]>([]);
@@ -19,44 +20,62 @@ export default function LineupPage() {
   const [stackIdx, setStackIdx] = useState(0);
   const [showSettings, setShowSettings] = useState(true);
   const [optimized, setOptimized] = useState(false);
-  const [selectedSlate, setSelectedSlate] = useState<string>("all");
-  const [slateLabel, setSlateLabel] = useState<string>("");
+  const [selectedSlate, setSelectedSlateLocal] = useState<string>("all");
+  const [slateLabel, setSlateLabel] = useState<string>("All Games");
+  const [slates, setSlates] = useState<{ id: string; label: string; games: number; lockTime: string; teams: string[]; type?: string }[]>([]);
+  const [slateDropOpen, setSlateDropOpen] = useState(false);
+
+  const changeSlate = async (id: string) => {
+    setSelectedSlateLocal(id);
+    persistSlate(id);
+    setSlateDropOpen(false);
+    setOptimized(false);
+    setLineup([]);
+    setExcludedGames(new Set());
+    await loadPlayers(id);
+  };
+
+  const loadPlayers = async (slateId: string) => {
+    setLoading(true);
+    let slateTeams: Set<string> | null = null;
+    if (slateId !== "all") {
+      const { data: slateData } = await supabase.from("slates").select("*").eq("id", slateId).single();
+      if (slateData?.teams?.length > 0) {
+        slateTeams = new Set(slateData.teams);
+        setSlateLabel(slateData.label);
+      }
+    } else {
+      setSlateLabel("All Games");
+    }
+    const { data } = await supabase.from("players").select("*").order("upside_pts", { ascending: false });
+    if (data) {
+      const filtered = slateTeams
+        ? data.filter((p: Player) => slateTeams!.has(p.team))
+        : data;
+      setPlayers(filtered);
+    }
+    setLoading(false);
+  };
 
   useEffect(() => {
-    // Read persisted slate selection
     const slateId = getSelectedSlate();
-    setSelectedSlate(slateId);
+    setSelectedSlateLocal(slateId);
 
-    // Subscribe to changes from the players page
+    // Load slates list
+    async function fetchSlates() {
+      const today = new Date().toISOString().split("T")[0];
+      const { data } = await supabase.from("slates").select("*").eq("date", today).order("games", { ascending: false });
+      if (data) setSlates(data.map(s => ({ id: s.id, label: s.label, games: s.games, lockTime: s.lock_time, teams: s.teams || [], type: s.type })));
+    }
+    fetchSlates();
+    loadPlayers(slateId);
+
     const unsub = subscribeSlate((id) => {
-      setSelectedSlate(id);
+      setSelectedSlateLocal(id);
+      loadPlayers(id);
       setOptimized(false);
       setLineup([]);
     });
-
-    async function load(slateId: string) {
-      setLoading(true);
-      // Fetch slate info to get team filter
-      let slateTeams: Set<string> | null = null;
-      if (slateId !== "all") {
-        const { data: slateData } = await supabase.from("slates").select("*").eq("id", slateId).single();
-        if (slateData?.teams?.length > 0) {
-          slateTeams = new Set(slateData.teams);
-          setSlateLabel(slateData.label);
-        }
-      }
-
-      const { data } = await supabase.from("players").select("*").order("upside_pts", { ascending: false });
-      if (data) {
-        const filtered = slateTeams
-          ? data.filter((p: Player) => slateTeams!.has(p.team))
-          : data;
-        setPlayers(filtered);
-      }
-      setLoading(false);
-    }
-
-    load(slateId);
     return unsub;
   }, []);
 
@@ -152,6 +171,43 @@ export default function LineupPage() {
         <div className="flex items-center gap-1 text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-lg">
           <Cpu size={10} /> Optimal
         </div>
+      </div>
+
+      {/* Slate Selector */}
+      <div className="relative mb-3">
+        <button onClick={() => setSlateDropOpen(!slateDropOpen)}
+          className="w-full flex items-center justify-between px-3 py-2 bg-zinc-900/80 border border-zinc-800 rounded-xl hover:border-zinc-700 transition-all">
+          <div className="flex items-center gap-2">
+            <Calendar size={14} className="text-emerald-400" />
+            <span className="text-sm font-bold text-zinc-200">{slateLabel}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-zinc-600">{players.length} players</span>
+            <ChevronDown size={14} className="text-zinc-500" />
+          </div>
+        </button>
+
+        {slateDropOpen && (
+          <div className="absolute left-0 right-0 top-full mt-1 bg-zinc-900 border border-zinc-700 rounded-xl p-2 z-50 shadow-2xl">
+            <button onClick={() => changeSlate("all")}
+              className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-all ${selectedSlate === "all" ? "bg-emerald-500/15 text-emerald-400 font-bold" : "text-zinc-300 hover:bg-zinc-800"}`}>
+              All Games
+            </button>
+            {slates.length > 0 && <div className="border-t border-zinc-800 my-1.5" />}
+            {slates.filter(s => s.type === "classic").map(slate => (
+              <button key={slate.id} onClick={() => changeSlate(slate.id)}
+                className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-all ${selectedSlate === slate.id ? "bg-emerald-500/15 text-emerald-400 font-bold" : "text-zinc-300 hover:bg-zinc-800"}`}>
+                <div className="flex justify-between items-center">
+                  <div>
+                    <span className="font-semibold">{slate.label}</span>
+                    <span className="text-[10px] text-zinc-500 ml-2">{slate.lockTime}</span>
+                  </div>
+                  <span className="text-[10px] text-zinc-500">{slate.teams.length} teams</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Mode toggle */}
