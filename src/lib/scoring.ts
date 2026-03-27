@@ -9,16 +9,18 @@ export interface LineupSlot {
   player: Player | null;
 }
 
+// FanDuel MLB rules: max 4 batters from same team (5th allowed only if a pitcher).
+// Stacks here are BATTER-only — pitcher is always from a separate team.
+// Max batter slots = 8 (P slot excluded). All stacks must sum ≤ 8, max tier = 4.
 export const STACK_FRAMEWORKS: { label: string; stacks: number[] }[] = [
-  { label: "No Stack", stacks: [] },
-  { label: "4×4", stacks: [4, 4] },
-  { label: "4×3×1", stacks: [4, 3, 1] },
-  { label: "4×2×2", stacks: [4, 2, 2] },
-  { label: "3×3×2", stacks: [3, 3, 2] },
-  { label: "3×3×1×1", stacks: [3, 3, 1, 1] },
-  { label: "5×3", stacks: [5, 3] },
-  { label: "4×3", stacks: [4, 3] },
-  { label: "3×2×2×1", stacks: [3, 2, 2, 1] },
+  { label: "No Stack",   stacks: [] },
+  { label: "4×4",       stacks: [4, 4] },       // 8 batters, 2 teams
+  { label: "4×3×1",     stacks: [4, 3, 1] },    // 8 batters, 3 teams
+  { label: "4×3",       stacks: [4, 3] },        // 7 batters
+  { label: "4×2×2",     stacks: [4, 2, 2] },    // 8 batters, 3 teams
+  { label: "3×3×2",     stacks: [3, 3, 2] },    // 8 batters, 3 teams
+  { label: "3×3×1×1",   stacks: [3, 3, 1, 1] },// 8 batters, 4 teams
+  { label: "3×2×2×1",   stacks: [3, 2, 2, 1] },// 8 batters, 4 teams
 ];
 
 export interface OptimizerConfig {

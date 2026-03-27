@@ -131,7 +131,10 @@ export default function LineupPage() {
   const lineupTeamCounts = useMemo(() => {
     const counts = new Map<string, number>();
     lineup.forEach((s) => {
-      if (s.player) counts.set(s.player.team, (counts.get(s.player.team) || 0) + 1);
+      // Exclude pitcher from stack display — stacks are batters only
+      if (s.player && s.player.position !== "P") {
+        counts.set(s.player.team, (counts.get(s.player.team) || 0) + 1);
+      }
     });
     return counts;
   }, [lineup]);
