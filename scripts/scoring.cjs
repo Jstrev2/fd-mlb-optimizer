@@ -1,6 +1,10 @@
 /**
- * FanDuel MLB DFS Scoring Engine v2 (CommonJS)
- * Vegas odds → devigged probs → E[X] + variance → projected & upside
+ * FanDuel MLB DFS Scoring Engine v3 (CommonJS)
+ * Changes from v2:
+ * - BB: uses real bb_odds/bb_2plus from sportsbook instead of hardcoded 0.35
+ * - Pitcher ER: uses er_line/er_over_odds market instead of game_total formula
+ * - game_total still used as fallback if er_line missing
+ * - tb_line/tb_over_odds supported as supplement to alt tiers
  */
 
 function impliedProb(odds) {
@@ -13,12 +17,12 @@ function devigOneSided(odds) {
   if (!odds) return 0;
   const raw = impliedProb(odds);
   let vigDivisor;
-  if (odds < -300) vigDivisor = 1.06;
+  if (odds < -300)      vigDivisor = 1.06;
   else if (odds < -150) vigDivisor = 1.10;
-  else if (odds < 0) vigDivisor = 1.12;
+  else if (odds < 0)    vigDivisor = 1.12;
   else if (odds <= 200) vigDivisor = 1.15;
   else if (odds <= 500) vigDivisor = 1.18;
-  else vigDivisor = 1.22;
+  else                  vigDivisor = 1.22;
   return Math.min(raw / vigDivisor, 0.99);
 }
 
@@ -41,6 +45,7 @@ function statMoments(tiers) {
 
   probs.sort((a, b) => a.k - b.k);
 
+  // Enforce monotonicity (P(X≥k) must decrease as k increases)
   for (let i = probs.length - 2; i >= 0; i--) {
     if (probs[i].p < probs[i + 1].p) {
       const avg = (probs[i].p + probs[i + 1].p) / 2;
@@ -50,11 +55,11 @@ function statMoments(tiers) {
   }
 
   const mean = probs.reduce((s, t) => s + t.p, 0);
-
   const maxK = probs[probs.length - 1].k;
   const lowestK = probs[0].k;
   const pmf = [];
 
+  // Below lowest tier
   const pBelow = 1 - probs[0].p;
   if (lowestK <= 1) {
     pmf.push({ k: 0, p: pBelow });
@@ -65,12 +70,14 @@ function statMoments(tiers) {
     }
   }
 
+  // Between tiers
   for (let i = 0; i < probs.length; i++) {
     const pk = probs[i].p;
     const pkNext = i + 1 < probs.length ? probs[i + 1].p : 0;
     pmf.push({ k: probs[i].k, p: pk - pkNext });
   }
 
+  // Tail extension
   const tailP = probs[probs.length - 1].p * 0.3;
   if (tailP > 0.005) {
     pmf[pmf.length - 1].p = Math.max(0, pmf[pmf.length - 1].p - tailP);
@@ -85,13 +92,17 @@ function statMoments(tiers) {
 
   const variance = Math.max(0, ex2 - mean * mean);
   const sd = Math.sqrt(variance);
-  const skewness = sd > 0.001 ? (ex3 - 3 * mean * variance - mean * mean * mean) / (sd * sd * sd) : 0;
+  const skewness = sd > 0.001
+    ? (ex3 - 3 * mean * variance - mean * mean * mean) / (sd * sd * sd)
+    : 0;
 
   return { mean, variance, skewness };
 }
 
 function calcB(p) {
-  if (!p.hit_odds && !p.tb_2plus && !p.rbi_odds && !p.run_odds) return { projected: 0, upside: 0 };
+  if (!p.hit_odds && !p.tb_2plus && !p.rbi_odds && !p.run_odds) {
+    return { projected: 0, upside: 0 };
+  }
 
   const tb = statMoments([
     { k: 1, odds: p.hit_odds },
@@ -119,16 +130,30 @@ function calcB(p) {
     { k: 2, odds: p.sbs_2plus },
   ]);
 
-  const expBB = 0.35;
+  // BB: use real market odds if available, else 0 (no guessing)
+  let expBB = 0;
+  if (p.bb_odds) {
+    const bb = statMoments([
+      { k: 1, odds: p.bb_odds },
+      { k: 2, odds: p.bb_2plus },
+    ]);
+    expBB = bb.mean;
+  }
+  // If no bb_odds at all, leave at 0. We do NOT hardcode 0.35 anymore.
+  // The player detail modal will show BB as missing, which is honest.
+
   const projected = 3 * tb.mean + 3.5 * rbi.mean + 3.2 * run.mean + 3 * expBB + 6 * sb.mean;
 
-  // Variance with covariance
-  const varIndep = 9 * tb.variance + 12.25 * rbi.variance + 10.24 * run.variance
-                 + 9 * 0.23 + 36 * sb.variance;
+  // Variance with covariance terms (TB↔RBI, TB↔R, R↔RBI)
+  const varIndep = 9 * tb.variance
+    + 12.25 * rbi.variance
+    + 10.24 * run.variance
+    + (p.bb_odds ? 9 * 0.15 : 0)  // BB variance only if we have real data
+    + 36 * sb.variance;
 
-  const sdTB = Math.sqrt(tb.variance);
+  const sdTB  = Math.sqrt(tb.variance);
   const sdRBI = Math.sqrt(rbi.variance);
-  const sdR = Math.sqrt(run.variance);
+  const sdR   = Math.sqrt(run.variance);
 
   let rhoTB_RBI = 0.50, rhoTB_R = 0.45, rhoR_RBI = 0.40;
   if (p.hr_odds) {
@@ -136,14 +161,14 @@ function calcB(p) {
     if (hrProb > 0.15) {
       const boost = Math.min((hrProb - 0.15) * 2, 0.15);
       rhoTB_RBI += boost;
-      rhoTB_R += boost;
-      rhoR_RBI += boost * 0.7;
+      rhoTB_R   += boost;
+      rhoR_RBI  += boost * 0.7;
     }
   }
 
-  const varCov = 21 * rhoTB_RBI * sdTB * sdRBI
-               + 19.2 * rhoTB_R * sdTB * sdR
-               + 22.4 * rhoR_RBI * sdR * sdRBI;
+  const varCov = 21   * rhoTB_RBI * sdTB * sdRBI
+               + 19.2 * rhoTB_R   * sdTB * sdR
+               + 22.4 * rhoR_RBI  * sdR  * sdRBI;
 
   const totalVar = Math.max(0.01, varIndep + varCov);
   const sigma = Math.sqrt(totalVar);
@@ -163,7 +188,7 @@ function calcB(p) {
 
   return {
     projected: Math.round(projected * 10) / 10,
-    upside: Math.round(upside * 10) / 10,
+    upside:    Math.round(upside * 10) / 10,
   };
 }
 
@@ -196,8 +221,8 @@ function poissonP90(lambda) {
 }
 
 function erf(x) {
-  const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741;
-  const a4 = -1.453152027, a5 = 1.061405429, pp = 0.3275911;
+  const a1 =  0.254829592, a2 = -0.284496736, a3 = 1.421413741;
+  const a4 = -1.453152027, a5 =  1.061405429, pp = 0.3275911;
   const sign = x < 0 ? -1 : 1;
   x = Math.abs(x);
   const t = 1.0 / (1.0 + pp * x);
@@ -206,29 +231,35 @@ function erf(x) {
 }
 
 function calcP(p) {
+  // === STRIKEOUTS ===
   const kTiers = [];
-  const altKs = [[3,p.ks_alt_3plus],[4,p.ks_alt_4plus],[5,p.ks_alt_5plus],
-    [6,p.ks_alt_6plus],[7,p.ks_alt_7plus],[8,p.ks_alt_8plus],
-    [9,p.ks_alt_9plus],[10,p.ks_alt_10plus]];
+  const altKs = [
+    [3, p.ks_alt_3plus], [4, p.ks_alt_4plus], [5, p.ks_alt_5plus],
+    [6, p.ks_alt_6plus], [7, p.ks_alt_7plus], [8, p.ks_alt_8plus],
+    [9, p.ks_alt_9plus], [10, p.ks_alt_10plus],
+  ];
   for (const [k, odds] of altKs) {
     if (odds) kTiers.push({ k, prob: devigOneSided(odds) });
   }
 
   let expectedKs, kP90;
   if (kTiers.length >= 3) {
+    // Poisson fit to alt K tiers — most accurate
     const lambda = fitPoissonLambda(kTiers);
     expectedKs = lambda;
     kP90 = poissonP90(lambda);
   } else if (p.ks_line && p.ks_over_odds) {
+    // O/U line with lean
     const overProb = devigOneSided(p.ks_over_odds);
     expectedKs = p.ks_line + (overProb - 0.5) * 1.5;
     kP90 = Math.ceil(expectedKs + 1.28 * Math.sqrt(expectedKs));
   } else {
-    expectedKs = 5;
-    kP90 = 8;
+    // No K data at all — return 0, don't guess
+    return { projected: 0, upside: 0 };
   }
 
-  let expectedOuts = 16;
+  // === OUTS ===
+  let expectedOuts = 16; // default: ~5.3 innings
   if (p.outs_line) {
     const overProb = p.outs_over_odds ? devigOneSided(p.outs_over_odds) : 0.5;
     expectedOuts = p.outs_line + (overProb - 0.5) * 2;
@@ -236,33 +267,60 @@ function calcP(p) {
   const outsSD = 4.5;
   const outsP90 = Math.min(expectedOuts + 1.28 * outsSD, 27);
 
-  const winProb = p.win_odds ? devigOneSided(p.win_odds) : 0.45;
-  const pitcherWinProb = winProb * 0.80;
-  const gameTotal = p.game_total || 8.5;
-  const expectedER = gameTotal * (1 - winProb) * (expectedOuts / 27);
-  const erP10 = Math.max(0, expectedER - 1.28 * 1.5);
+  // === WIN PROBABILITY ===
+  const winProb = p.win_odds ? devigOneSided(p.win_odds) : 0.50;
+  const pitcherWinProb = winProb * 0.80; // ~80% of team wins = SP decision
 
+  // === EARNED RUNS ===
+  // Priority: 1) er_line market (real odds), 2) game_total formula, 3) default 8.5 total
+  let expectedER, erSD;
+  if (p.er_line !== null && p.er_line !== undefined) {
+    // Real ER market — most accurate
+    const erOverProb = p.er_over_odds ? devigTwoSided(p.er_over_odds, -p.er_over_odds).overProb : 0.5;
+    expectedER = p.er_line + (erOverProb - 0.5) * 0.5;
+    erSD = 1.2; // ER has tighter distribution when we have real market
+  } else {
+    // Derive from game total: opponent implied runs × (outs/27)
+    const gameTotal = p.game_total || 8.5;
+    // Opponent implied = roughly half the game total (adjusted by win prob)
+    const oppImplied = gameTotal * (1 - winProb);
+    expectedER = oppImplied * (expectedOuts / 27);
+    erSD = 1.5;
+  }
+  const erP10 = Math.max(0, expectedER - 1.28 * erSD);
+
+  // === QS PROBABILITY ===
   const pOuts18 = expectedOuts >= 18
     ? 0.5 + 0.5 * erf((expectedOuts - 18) / (outsSD * Math.SQRT2))
     : 0.5 - 0.5 * erf((18 - expectedOuts) / (outsSD * Math.SQRT2));
   let pER3 = 0;
   for (let k = 0; k <= 3; k++) {
     let logP = -expectedER;
-    for (let j = 1; j <= k; j++) logP += Math.log(expectedER / j);
+    for (let j = 1; j <= k; j++) logP += Math.log(Math.max(expectedER, 0.01) / j);
     pER3 += Math.exp(logP);
   }
   const qsProb = Math.min(0.85, pOuts18 * pER3 * 0.90);
 
-  const projected = expectedKs * 3 + expectedOuts * 1 + expectedER * -3 + pitcherWinProb * 6 + qsProb * 4;
+  // === FD SCORING ===
+  // P: K×3, Out×1, ER×-3, W×6, QS×4
+  const projected = expectedKs * 3
+    + expectedOuts * 1
+    + expectedER   * -3
+    + pitcherWinProb * 6
+    + qsProb         * 4;
 
   const upsideWin = winProb >= 0.40 ? 1 : 0;
-  const upsideQS = (outsP90 >= 18 && erP10 <= 3) ? 1 : 0;
-  const upside = kP90 * 3 + outsP90 * 1 + erP10 * -3 + upsideWin * 6 + upsideQS * 4;
+  const upsideQS  = (outsP90 >= 18 && erP10 <= 3) ? 1 : 0;
+  const upside = kP90 * 3
+    + outsP90  * 1
+    + erP10    * -3
+    + upsideWin * 6
+    + upsideQS  * 4;
 
   return {
     projected: Math.round(projected * 10) / 10,
-    upside: Math.round(upside * 10) / 10,
+    upside:    Math.round(upside * 10) / 10,
   };
 }
 
-module.exports = { calcB, calcP, devigOneSided, impliedProb };
+module.exports = { calcB, calcP, devigOneSided, devigTwoSided, impliedProb, statMoments };

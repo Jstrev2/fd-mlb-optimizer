@@ -52,6 +52,8 @@ export default function PlayerDetail({ player: p, onClose }: Props) {
     { label: "Run 1+", key: "run_odds", odds: p.run_odds, fdPts: "3.2 per R" },
     { label: "Run 2+", key: "runs_2plus", odds: p.runs_2plus, fdPts: "3.2 per R" },
     { label: "Run 3+", key: "runs_3plus", odds: p.runs_3plus, fdPts: "3.2 per R" },
+    { label: "BB 1+", key: "bb_odds", odds: p.bb_odds, fdPts: "3 per BB" },
+    { label: "BB 2+", key: "bb_2plus", odds: p.bb_2plus, fdPts: "3 per BB" },
     { label: "SB 1+", key: "sb_odds", odds: p.sb_odds, fdPts: "6 per SB" },
     { label: "SB 2+", key: "sbs_2plus", odds: p.sbs_2plus, fdPts: "6 per SB" },
     { label: "Single", key: "single_odds", odds: p.single_odds, fdPts: "3" },
@@ -77,6 +79,8 @@ export default function PlayerDetail({ player: p, onClose }: Props) {
     { label: "Outs O/U Line", key: "outs_line", odds: p.outs_line, fdPts: "1 per out" },
     { label: "Outs Over Odds", key: "outs_over_odds", odds: p.outs_over_odds, fdPts: "—" },
     { label: "Win Odds", key: "win_odds", odds: p.win_odds, fdPts: "6 (W)" },
+    { label: "ER O/U Line", key: "er_line", odds: p.er_line, fdPts: "-3 per ER" },
+    { label: "ER Under Odds", key: "er_over_odds", odds: p.er_over_odds, fdPts: "—" },
   ];
 
   const tiers = isPitcher ? pitcherTiers : batterTiers;
@@ -106,18 +110,22 @@ export default function PlayerDetail({ player: p, onClose }: Props) {
       return { ev: probs.reduce((s, t) => s + t.p, 0), probs };
     };
 
-    const tb = calcEV(tbTiers);
+    const bbTiers = [
+      { k: 1, odds: p.bb_odds }, { k: 2, odds: p.bb_2plus },
+    ].filter(t => t.odds);
+
+    const tb  = calcEV(tbTiers);
     const rbi = calcEV(rbiTiers);
     const run = calcEV(runTiers);
-    const sb = calcEV(sbTiers);
-    const bb = { ev: 0.35, probs: [] as { k: number; p: number }[] };
+    const sb  = calcEV(sbTiers);
+    const bb  = calcEV(bbTiers);
 
     breakdown = [
-      { stat: "TB", terms: tb.probs.map(t => fmtPct(t.p)).join(" + "), ev: tb.ev, pts: tb.ev * 3 },
+      { stat: "TB",  terms: tb.probs.map(t => fmtPct(t.p)).join(" + "), ev: tb.ev,  pts: tb.ev  * 3   },
       { stat: "RBI", terms: rbi.probs.map(t => fmtPct(t.p)).join(" + "), ev: rbi.ev, pts: rbi.ev * 3.5 },
-      { stat: "R", terms: run.probs.map(t => fmtPct(t.p)).join(" + "), ev: run.ev, pts: run.ev * 3.2 },
-      { stat: "BB", terms: "est. 0.35", ev: bb.ev, pts: bb.ev * 3 },
-      { stat: "SB", terms: sb.probs.map(t => fmtPct(t.p)).join(" + "), ev: sb.ev, pts: sb.ev * 6 },
+      { stat: "R",   terms: run.probs.map(t => fmtPct(t.p)).join(" + "), ev: run.ev, pts: run.ev * 3.2 },
+      { stat: "BB",  terms: bb.probs.length > 0 ? bb.probs.map(t => fmtPct(t.p)).join(" + ") : "no market data", ev: bb.ev, pts: bb.ev * 3 },
+      { stat: "SB",  terms: sb.probs.map(t => fmtPct(t.p)).join(" + "), ev: sb.ev,  pts: sb.ev  * 6   },
     ];
   }
 
@@ -262,7 +270,7 @@ export default function PlayerDetail({ player: p, onClose }: Props) {
               Pitcher Calculation
             </h3>
             <p className="text-[10px] text-zinc-600 mb-2">
-              Ks: Poisson fit to alt tiers · Outs: O/U lean · ER: game_total × (1-win%) × (outs/27)
+              Ks: Poisson fit to alt tiers · Outs: O/U lean · ER: {p.er_line ? `real ER market (line: ${p.er_line})` : `derived (game total ${p.game_total ?? "8.5"} × opp% × outs/27)`}
             </p>
             <div className="bg-zinc-950 rounded-lg border border-zinc-800 p-3 text-[11px] font-mono text-zinc-400 space-y-1">
               <div>FD = 3×E[K] + 1×E[outs] − 3×E[ER] + 6×P(W)×0.80 + 4×P(QS)</div>
@@ -274,9 +282,9 @@ export default function PlayerDetail({ player: p, onClose }: Props) {
         {/* Data Source */}
         <div className="px-4 py-3 border-t border-zinc-800">
           <p className="text-[10px] text-zinc-600">
-            Odds: FanDuel Sportsbook API · Salary: RotoGrinders · Team: DailyFantasyFuel · 
-            Devig: multiplicative (÷{"{"}1.06–1.22{"}"} by odds magnitude) · 
-            No estimated or fallback data — missing props = 0 contribution
+            Odds: {p.odds_source === 'odds-api-consensus' ? 'Multi-book consensus (FD + DK + BetMGM + Pinnacle) via The Odds API' : 'FanDuel Sportsbook API'} · Salary: RotoGrinders · Slate: DailyFantasyFuel ·
+            Devig: Pinnacle 2× weight, others 1× · multiplicative (÷1.06–1.22 by odds magnitude) ·
+            BB hardcode removed — real market or 0 · ER: {p.er_line ? 'real market' : 'game total formula'}
           </p>
         </div>
       </div>

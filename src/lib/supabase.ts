@@ -35,9 +35,15 @@ export interface Player {
   run_odds: number | null;
   runs_2plus: number | null;
   runs_3plus: number | null;
+  // Walks (BB)
+  bb_odds: number | null;
+  bb_2plus: number | null;
   // SBs
   sb_odds: number | null;
   sbs_2plus: number | null;
+  // Total bases O/U line
+  tb_line: number | null;
+  tb_over_odds: number | null;
   // Hits+Runs+RBIs combo
   hrr_1plus: number | null;
   hrr_2plus: number | null;
@@ -59,6 +65,13 @@ export interface Player {
   outs_over_odds: number | null;
   // Moneyline (for win prob)
   win_odds: number | null;
+  // Pitcher: Earned Runs (real market)
+  er_line: number | null;
+  er_over_odds: number | null;
+  // Game context
+  game_total: number | null;
+  // Metadata
+  odds_source: string | null;
   // Computed
   projected_pts: number;
   upside_pts: number;
