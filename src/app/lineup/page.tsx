@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase, Player } from "@/lib/supabase";
 import { SALARY_CAP, MAX_PER_TEAM, STACK_FRAMEWORKS, LineupSlot, OptimizerConfig } from "@/lib/scoring";
+import { getSelectedSlate, subscribeSlate } from "@/lib/slateContext";
 import { solve } from "@/lib/optimizer";
 import BottomNav from "@/components/BottomNav";
 import { motion } from "framer-motion";
@@ -18,14 +19,45 @@ export default function LineupPage() {
   const [stackIdx, setStackIdx] = useState(0);
   const [showSettings, setShowSettings] = useState(true);
   const [optimized, setOptimized] = useState(false);
+  const [selectedSlate, setSelectedSlate] = useState<string>("all");
+  const [slateLabel, setSlateLabel] = useState<string>("");
 
   useEffect(() => {
-    async function load() {
+    // Read persisted slate selection
+    const slateId = getSelectedSlate();
+    setSelectedSlate(slateId);
+
+    // Subscribe to changes from the players page
+    const unsub = subscribeSlate((id) => {
+      setSelectedSlate(id);
+      setOptimized(false);
+      setLineup([]);
+    });
+
+    async function load(slateId: string) {
+      setLoading(true);
+      // Fetch slate info to get team filter
+      let slateTeams: Set<string> | null = null;
+      if (slateId !== "all") {
+        const { data: slateData } = await supabase.from("slates").select("*").eq("id", slateId).single();
+        if (slateData?.teams?.length > 0) {
+          slateTeams = new Set(slateData.teams);
+          setSlateLabel(slateData.label);
+        }
+      }
+
       const { data } = await supabase.from("players").select("*").order("upside_pts", { ascending: false });
-      if (data) setPlayers(data);
+      if (data) {
+        const filtered = slateTeams
+          ? data.filter((p: Player) => slateTeams!.has(p.team))
+          : data;
+        setPlayers(filtered);
+      }
       setLoading(false);
     }
-    load();
+
+    load(slateId);
+    return unsub;
   }, []);
 
   // Build games list from team/opponent pairs
@@ -109,7 +141,10 @@ export default function LineupPage() {
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-black">⚡ Optimizer</h1>
-          <p className="text-zinc-500 text-xs">{activePlayerCount} players · Branch & Bound</p>
+          <p className="text-zinc-500 text-xs">
+            {activePlayerCount} players · Branch & Bound
+            {slateLabel && <span className="text-emerald-400/70"> · {slateLabel}</span>}
+          </p>
         </div>
         <div className="flex items-center gap-1 text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-lg">
           <Cpu size={10} /> Optimal

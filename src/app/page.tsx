@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo } from "react";
 import { supabase, Player } from "@/lib/supabase";
 import BottomNav from "@/components/BottomNav";
 import Link from "next/link";
+import { getSelectedSlate, setSelectedSlate as persistSlate, subscribeSlate } from "@/lib/slateContext";
 import PlayerDetail from "@/components/PlayerDetail";
 import { Download, Loader2, Search, ChevronDown, X, Calendar } from "lucide-react";
 
@@ -22,7 +23,7 @@ export default function PlayersPage() {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   // Slate state
   const [slates, setSlates] = useState<Slate[]>([]);
-  const [selectedSlate, setSelectedSlate] = useState<string>("all");
+  const [selectedSlate, setSelectedSlateState] = useState<string>("all");
   const [slateDropOpen, setSlateDropOpen] = useState(false);
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
 
@@ -40,16 +41,32 @@ export default function PlayersPage() {
       if (data.slates && data.slates.length > 0) {
         setSlates(data.slates);
         // Auto-select the biggest classic slate (All Day) if none selected
-        setSelectedSlate(prev => {
-          if (prev !== "all") return prev;
+        setSelectedSlateState(prev => {
+          const current = getSelectedSlate();
+          if (current !== "all") return current; // respect whatever's stored
           const allDay = data.slates.find((s: Slate) => s.label?.toLowerCase().includes("all day") && s.type === "classic");
-          return allDay ? allDay.id : prev;
+          const next = allDay ? allDay.id : prev;
+          persistSlate(next);
+          return next;
         });
       }
     } catch { /* silent */ }
   };
 
-  useEffect(() => { fetchPlayers(); fetchSlates(); }, []);
+  // Sync slate state with localStorage
+  const setSelectedSlate = (id: string) => {
+    setSelectedSlateState(id);
+    persistSlate(id);
+  };
+
+  useEffect(() => {
+    setSelectedSlateState(getSelectedSlate());
+    fetchPlayers();
+    fetchSlates();
+    // Keep in sync if another page changes it
+    const unsub = subscribeSlate((id) => setSelectedSlateState(id));
+    return unsub;
+  }, []);
 
   const loadSlate = async () => {
     setImporting(true);
