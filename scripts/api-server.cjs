@@ -1,99 +1,98 @@
 #!/usr/bin/env node
 /**
- * VPS API server for FD MLB DFS Optimizer
- * Exposes /api/import endpoint that runs the full pipeline
- * Runs on port 3847 (obscure, not guessable)
+ * VPS Job Runner for FD MLB DFS Optimizer
+ * Polls Supabase import_jobs table for pending jobs and runs the pipeline.
+ * No HTTP server needed — communicates entirely through Supabase.
  */
-const http = require('http');
 const { execFile } = require('child_process');
 const path = require('path');
 
-const PORT = 3847;
+const SUPABASE_URL = 'https://udwafzawzeaoteghfwjq.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkd2FmemF3emVhb3RlZ2hmd2pxIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NDM4Mjc1MCwiZXhwIjoyMDg5OTU4NzUwfQ.dbO_BZfeb6X2cBbPyr6cyrJC_SRwSC_Qr9ikn1W1_nc';
 const SCRIPTS_DIR = __dirname;
+const POLL_INTERVAL = 5000; // 5 seconds
 
-let importing = false;
-let lastImport = null;
-let lastResult = null;
+const headers = {
+  'Authorization': `Bearer ${SUPABASE_KEY}`,
+  'apikey': SUPABASE_KEY,
+  'Content-Type': 'application/json',
+  'Prefer': 'return=representation',
+};
 
-const server = http.createServer((req, res) => {
-  // CORS headers for Vercel app
-  res.setHeader('Access-Control-Allow-Origin', 'https://fd-mlb-optimizer.vercel.app');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  
-  if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+async function updateJob(jobId, status, result = null) {
+  const body = { status, updated_at: new Date().toISOString() };
+  if (result) body.result = result;
+  await fetch(`${SUPABASE_URL}/rest/v1/import_jobs?id=eq.${jobId}`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify(body),
+  });
+}
 
-  // Status endpoint
-  if (req.url === '/api/status' && req.method === 'GET') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ 
-      importing, 
-      lastImport, 
-      lastResult,
-      uptime: process.uptime(),
-    }));
-    return;
-  }
+async function runImport(jobId) {
+  console.log(`[${new Date().toISOString()}] Running import for job ${jobId}...`);
+  await updateJob(jobId, 'running');
 
-  // Import endpoint
-  if (req.url === '/api/import' && req.method === 'POST') {
-    if (importing) {
-      res.writeHead(409, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Import already running', startedAt: lastImport }));
-      return;
-    }
+  const slatesScript = path.join(SCRIPTS_DIR, 'scrape-slates.cjs');
+  const importScript = path.join(SCRIPTS_DIR, 'import-with-salaries.cjs');
 
-    importing = true;
-    lastImport = new Date().toISOString();
-    lastResult = null;
-
-    // Send immediate response
-    res.writeHead(202, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'started', startedAt: lastImport }));
-
-    // Run full pipeline in background
-    const slatesScript = path.join(SCRIPTS_DIR, 'scrape-slates.cjs');
-    const importScript = path.join(SCRIPTS_DIR, 'import-with-salaries.cjs');
-
-    console.log(`[${lastImport}] Import started...`);
-
+  return new Promise((resolve) => {
     // Step 1: Slates
-    execFile('node', [slatesScript], { timeout: 60000 }, (err1, stdout1, stderr1) => {
+    execFile('node', [slatesScript], { timeout: 60000, cwd: path.join(SCRIPTS_DIR, '..') }, (err1, stdout1, stderr1) => {
       console.log(stdout1);
       if (err1) console.error('Slates error:', stderr1);
 
-      // Step 2: Import players + props
-      execFile('node', [importScript], { timeout: 120000 }, (err2, stdout2, stderr2) => {
+      // Step 2: Import
+      execFile('node', [importScript], { timeout: 180000, cwd: path.join(SCRIPTS_DIR, '..') }, async (err2, stdout2, stderr2) => {
         console.log(stdout2);
         if (err2) console.error('Import error:', stderr2);
 
-        importing = false;
         const output = (stdout1 + '\n' + stdout2).trim();
-        
-        // Parse results from output
         const playerMatch = output.match(/✅\s*(\d+)\s*players/);
         const propMatch = output.match(/(\d+)\s*w\/props/);
         const slateMatch = output.match(/(\d+)\s*slates saved/);
+        const creditMatch = output.match(/credits remaining:\s*(\S+)/i);
 
-        lastResult = {
+        const result = {
           success: !err2,
           completedAt: new Date().toISOString(),
           players: playerMatch ? parseInt(playerMatch[1]) : 0,
           withProps: propMatch ? parseInt(propMatch[1]) : 0,
           slates: slateMatch ? parseInt(slateMatch[1]) : 0,
-          error: err2 ? stderr2.substring(0, 200) : null,
+          creditsRemaining: creditMatch ? creditMatch[1] : null,
+          error: err2 ? (stderr2 || '').substring(0, 300) : null,
         };
 
-        console.log(`[${lastResult.completedAt}] Import complete:`, lastResult);
+        await updateJob(jobId, err2 ? 'error' : 'done', result);
+        console.log(`[${result.completedAt}] Import complete:`, result);
+        resolve(result);
       });
     });
-    return;
+  });
+}
+
+let running = false;
+
+async function poll() {
+  if (running) return;
+
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/import_jobs?status=eq.pending&order=created_at.asc&limit=1`,
+      { headers }
+    );
+    const jobs = await res.json();
+
+    if (jobs.length > 0) {
+      running = true;
+      await runImport(jobs[0].id);
+      running = false;
+    }
+  } catch (e) {
+    console.error('Poll error:', e.message);
   }
+}
 
-  res.writeHead(404, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({ error: 'Not found' }));
-});
-
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`FD MLB Optimizer API running on port ${PORT}`);
-});
+console.log(`FD MLB Optimizer Job Runner started (polling every ${POLL_INTERVAL / 1000}s)`);
+setInterval(poll, POLL_INTERVAL);
+poll(); // immediate first check

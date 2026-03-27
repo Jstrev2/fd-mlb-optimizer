@@ -72,32 +72,36 @@ export default function PlayersPage() {
   
   const loadSlate = async () => {
     setImporting(true);
-    setImportStatus("Starting import...");
+    setImportStatus("Queuing import...");
     try {
       const res = await fetch("/api/import-slate", { method: "POST" });
       const data = await res.json();
       if (data.error) { setImportStatus("Error: " + data.error); setImporting(false); return; }
-      setImportStatus("Running pipeline (slates → odds → scores)...");
+      if (data.status === "already_running") { setImportStatus("Import already running..."); }
+      else { setImportStatus("Running pipeline (slates → odds → scores)..."); }
+      const jobId = data.jobId;
       
-      // Poll status until done
+      // Poll job status via Supabase
       const poll = async () => {
-        const sr = await fetch("/api/import-slate");
-        const st = await sr.json();
-        if (st.importing) {
+        const { data: job } = await supabase.from("import_jobs").select("*").eq("id", jobId).single();
+        if (!job) { setTimeout(poll, 3000); return; }
+        if (job.status === "pending" || job.status === "running") {
+          setImportStatus(job.status === "running" ? "Running pipeline (slates → odds → scores)..." : "Queued, waiting for runner...");
           setTimeout(poll, 3000);
-        } else if (st.lastResult) {
-          setImportStatus(`✅ ${st.lastResult.players} players · ${st.lastResult.withProps} w/props`);
+        } else if (job.status === "done" && job.result) {
+          const r = job.result;
+          setImportStatus(`✅ ${r.players} players · ${r.withProps} w/props${r.creditsRemaining ? ` · ${r.creditsRemaining} credits left` : ""}`);
           fetchPlayers();
           fetchSlates();
           setImporting(false);
         } else {
-          setImportStatus("Done");
+          setImportStatus(job.result?.error ? `Error: ${job.result.error}` : "Import failed");
           setImporting(false);
         }
       };
-      setTimeout(poll, 5000); // first poll after 5s
+      setTimeout(poll, 3000);
     } catch (e) {
-      setImportStatus("Failed to reach import server");
+      setImportStatus("Failed to queue import: " + String(e));
       setImporting(false);
     }
   };
