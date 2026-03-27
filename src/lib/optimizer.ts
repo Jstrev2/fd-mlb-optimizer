@@ -1,5 +1,5 @@
 import { Player } from "./supabase";
-import { SALARY_CAP, MAX_PER_TEAM, LineupSlot, OptimizerConfig } from "./scoring";
+import { SALARY_CAP, MAX_PER_TEAM, MAX_BATTERS_PER_TEAM, LineupSlot, OptimizerConfig } from "./scoring";
 
 // Position slot requirements
 const SLOT_POSITIONS = ["P", "C/1B", "2B", "3B", "SS", "OF", "OF", "OF", "UTIL"] as const;
@@ -80,6 +80,10 @@ export function solve(allPlayers: Player[], config: OptimizerConfig): LineupSlot
         }
       }
 
+      // FD rule: must have players from at least 3 different teams
+      const uniqueTeams = new Set(chosen.map(c => c.team));
+      if (uniqueTeams.size < 3) return;
+
       if (currentValue > best.value) {
         best.value = currentValue;
         best.players = [...chosen];
@@ -102,9 +106,15 @@ export function solve(allPlayers: Player[], config: OptimizerConfig): LineupSlot
       if (player.salary > remainingSalary) continue;
       if (remainingSalary - player.salary < minSalaryNeeded) continue;
 
-      // Team limit check
+      // Team limit check — FD rules:
+      // Max 5 total from same team, but max 4 batters (pitcher doesn't count toward batter limit)
       const tc = teamCounts.get(player.team) || 0;
-      if (tc >= MAX_PER_TEAM) continue;
+      if (tc >= MAX_PER_TEAM) continue; // hard cap: 5 total
+      if (slotIdx > 0) {
+        // This is a batter slot — count existing batters from this team
+        const batterCount = chosen.filter((c, idx) => idx > 0 && c.team === player.team).length;
+        if (batterCount >= MAX_BATTERS_PER_TEAM) continue; // max 4 batters
+      }
 
       // Don't pick batters who face our pitcher (opponent team = pitcher's opponent)
       if (slotIdx > 0 && chosen[0]?.opponent && player.team === chosen[0].opponent) continue;

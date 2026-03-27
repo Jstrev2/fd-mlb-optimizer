@@ -219,7 +219,7 @@ export default function LineupPage() {
           </div>
 
           <div className="text-[10px] text-zinc-600 px-1">
-            FanDuel: 9 players · $35K cap · Max {MAX_PER_TEAM}/team · P, C/1B, 2B, 3B, SS, OF×3, UTIL
+            FanDuel: 9 players · $35K cap · Max 4 batters/team (5 w/ pitcher) · Min 3 teams · P, C/1B, 2B, 3B, SS, OF×3, UTIL
           </div>
         </div>
       )}

@@ -2,7 +2,8 @@ import { Player } from "./supabase";
 
 // === FANDUEL CONSTRAINTS ===
 export const SALARY_CAP = 35000;
-export const MAX_PER_TEAM = 4;
+export const MAX_BATTERS_PER_TEAM = 4;  // FD rule: max 4 batters from same team
+export const MAX_PER_TEAM = 5;          // FD rule: 5 total allowed if one is a pitcher
 
 export interface LineupSlot {
   position: string;
