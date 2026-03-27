@@ -8,7 +8,7 @@ import { Download, Loader2, Search, ChevronDown, X, Calendar } from "lucide-reac
 
 type SortKey = "upside_pts" | "projected_pts" | "salary" | "name" | "value";
 type SortDir = "asc" | "desc";
-interface Slate { id: string; label: string; games: number; lockTime: string; teams: string[]; }
+interface Slate { id: string; label: string; games: number; lockTime: string; teams: string[]; type?: string; }
 
 export default function PlayersPage() {
   const [players, setPlayers] = useState<Player[]>([]);
@@ -37,7 +37,15 @@ export default function PlayersPage() {
     try {
       const res = await fetch("/api/slates");
       const data = await res.json();
-      if (data.slates) setSlates(data.slates);
+      if (data.slates && data.slates.length > 0) {
+        setSlates(data.slates);
+        // Auto-select the biggest classic slate (All Day) if none selected
+        setSelectedSlate(prev => {
+          if (prev !== "all") return prev;
+          const allDay = data.slates.find((s: Slate) => s.label?.toLowerCase().includes("all day") && s.type === "classic");
+          return allDay ? allDay.id : prev;
+        });
+      }
     } catch { /* silent */ }
   };
 
@@ -49,7 +57,7 @@ export default function PlayersPage() {
       const res = await fetch("/api/import-slate", { method: "POST" });
       const data = await res.json();
       if (data.error) alert("Import error: " + data.error);
-      else { alert(`✅ ${data.imported} players imported`); fetchPlayers(); }
+      else { fetchPlayers(); fetchSlates(); }
     } catch { alert("Failed to import"); }
     setImporting(false);
   };
