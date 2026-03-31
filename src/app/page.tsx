@@ -44,8 +44,11 @@ export default function PlayersPage() {
         setSelectedSlateState(prev => {
           const current = getSelectedSlate();
           if (current !== "all") return current; // respect whatever's stored
+          // Default to Main slate, then All Day, then first classic
+          const main = data.slates.find((s: Slate) => s.label?.toLowerCase().includes("main") && s.type === "classic");
           const allDay = data.slates.find((s: Slate) => s.label?.toLowerCase().includes("all day") && s.type === "classic");
-          const next = allDay ? allDay.id : prev;
+          const firstClassic = data.slates.find((s: Slate) => s.type === "classic");
+          const next = main?.id || allDay?.id || firstClassic?.id || prev;
           persistSlate(next);
           return next;
         });
