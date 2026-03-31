@@ -74,6 +74,7 @@ export default function PlayersPage() {
   }, []);
 
   const [importStatus, setImportStatus] = useState<string>("");
+  const [showDKModal, setShowDKModal] = useState(false);
   
   const loadSlate = async () => {
     setImporting(true);
@@ -110,6 +111,10 @@ export default function PlayersPage() {
       setImporting(false);
     }
   };
+
+  const scrapeDK = () => setShowDKModal(true);
+
+  const dkScript = `fetch('https://sportsbook-nash.draftkings.com/sites/US-SB/api/v5/eventgroups/84240/categories/583/subcategories/4518',{credentials:'include'}).then(r=>r.json()).then(async d=>{const cats=[{cat:583,sub:4518,name:'earned-runs'},{cat:583,sub:4519,name:'outs'},{cat:583,sub:4517,name:'strikeouts'},{cat:743,sub:6607,name:'walks-allowed'},{cat:743,sub:6606,name:'hits-allowed'}];const all={};for(const c of cats){try{const r=await fetch('https://sportsbook-nash.draftkings.com/sites/US-SB/api/v5/eventgroups/84240/categories/'+c.cat+'/subcategories/'+c.sub,{credentials:'include'});const j=await r.json();const events=j?.eventGroup?.offerCategories||[];events.forEach(cat=>cat?.offerSubcategoryDescriptors?.forEach(sub=>sub?.offerSubcategory?.offers?.forEach(row=>row?.forEach(o=>{const name=o?.outcomes?.[0]?.participant||o?.outcomes?.[0]?.label||'';const line=o?.outcomes?.[0]?.line;const odds=o?.outcomes?.[0]?.oddsAmerican;const under=o?.outcomes?.[1]?.oddsAmerican;if(name&&line){if(!all[name])all[name]={};all[name][c.name+'_line']=line;all[name][c.name+'_over']=odds;all[name][c.name+'_under']=under;}}))));console.log(c.name+': done');}catch(e){console.log(c.name+': '+e.message);}}const payload={id:'dk-all-'+new Date().toISOString().split('T')[0],date:new Date().toISOString().split('T')[0],category:'all',data:all,player_count:Object.keys(all).length,scraped_at:new Date().toISOString()};const r=await fetch('https://udwafzawzeaoteghfwjq.supabase.co/rest/v1/dk_props',{method:'POST',headers:{'Authorization':'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkd2FmemF3emVhb3RlZ2hmd2pxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzODI3NTAsImV4cCI6MjA4OTk1ODc1MH0.9Y-4XLE_qrfONurb6x1VxOl9lHbZY3eCgVtJEjvx2is','apikey':'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkd2FmemF3emVhb3RlZ2hmd2pxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzODI3NTAsImV4cCI6MjA4OTk1ODc1MH0.9Y-4XLE_qrfONurb6x1VxOl9lHbZY3eCgVtJEjvx2is','Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify(payload)});if(r.ok)alert('✅ '+Object.keys(all).length+' pitchers scraped!');else alert('Error: '+(await r.text()));}).catch(e=>alert('Navigate to draftkings.com/leagues/baseball/mlb first! Error: '+e.message));`;
 
   // Current slate info
   const currentSlate = slates.find(s => s.id === selectedSlate);
@@ -184,6 +189,10 @@ export default function PlayersPage() {
             className="px-2.5 py-1.5 bg-emerald-500/15 border border-emerald-500/30 rounded-lg text-xs font-bold text-emerald-400 hover:bg-emerald-500/25 transition-all disabled:opacity-50">
             {importing ? <Loader2 size={12} className="animate-spin inline" /> : <Download size={12} className="inline" />}
             {importing ? " ..." : " Import"}
+          </button>
+          <button onClick={scrapeDK} disabled={importing}
+            className="px-2.5 py-1.5 bg-purple-500/15 border border-purple-500/30 rounded-lg text-xs font-bold text-purple-400 hover:bg-purple-500/25 transition-all disabled:opacity-50">
+            DK
           </button>
           <Link href="/players/add" className="px-2.5 py-1.5 bg-blue-500/15 border border-blue-500/30 rounded-lg text-xs font-bold text-blue-400 hover:bg-blue-500/25 transition-all">+</Link>
         </div>
@@ -326,6 +335,44 @@ export default function PlayersPage() {
       )}
 
       {selectedPlayer && <PlayerDetail player={selectedPlayer} onClose={() => setSelectedPlayer(null)} />}
+
+      {showDKModal && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" onClick={() => setShowDKModal(false)}>
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+          <div className="relative bg-zinc-900 border border-zinc-700 rounded-t-2xl sm:rounded-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto shadow-2xl p-5"
+            onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-black text-purple-400 mb-3">📥 Scrape DraftKings Props</h2>
+            <div className="space-y-3 text-sm text-zinc-300">
+              <div className="bg-zinc-800/50 rounded-lg p-3">
+                <p className="font-bold text-zinc-200 mb-1">Step 1:</p>
+                <p>Open <a href="https://sportsbook.draftkings.com/leagues/baseball/mlb" target="_blank" className="text-blue-400 underline">DraftKings MLB</a> in a new tab and make sure you can see the page (log in if needed).</p>
+              </div>
+              <div className="bg-zinc-800/50 rounded-lg p-3">
+                <p className="font-bold text-zinc-200 mb-1">Step 2:</p>
+                <p>Open browser console on that DK tab: <code className="bg-zinc-700 px-1 rounded text-xs">F12</code> → Console tab</p>
+              </div>
+              <div className="bg-zinc-800/50 rounded-lg p-3">
+                <p className="font-bold text-zinc-200 mb-1">Step 3:</p>
+                <p className="mb-2">Paste this script and hit Enter:</p>
+                <div className="relative">
+                  <pre className="bg-black rounded-lg p-3 text-[10px] text-green-400 overflow-x-auto max-h-24 overflow-y-auto">{dkScript.substring(0, 200)}...</pre>
+                  <button
+                    onClick={() => { navigator.clipboard.writeText(dkScript); setImportStatus("📋 DK script copied!"); }}
+                    className="absolute top-2 right-2 bg-purple-500 text-black text-[10px] font-bold px-2 py-1 rounded hover:bg-purple-400">
+                    Copy
+                  </button>
+                </div>
+              </div>
+              <div className="bg-zinc-800/50 rounded-lg p-3">
+                <p className="font-bold text-zinc-200 mb-1">Step 4:</p>
+                <p>You&apos;ll see &quot;✅ X pitchers scraped!&quot; — then come back here and hit <span className="text-emerald-400 font-bold">Import</span>.</p>
+              </div>
+            </div>
+            <button onClick={() => setShowDKModal(false)} className="mt-4 w-full py-2 bg-zinc-800 rounded-xl text-sm text-zinc-400 hover:bg-zinc-700">Close</button>
+          </div>
+        </div>
+      )}
+
       <BottomNav />
     </main>
   );
