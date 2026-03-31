@@ -91,13 +91,23 @@ async function getFDEvents() {
   const d = await r.json();
   const events = d?.attachments?.events || {};
   const markets = d?.attachments?.markets || {};
-  const today = new Date().toISOString().split('T')[0];
+  // Use Chicago time for "today" so late West Coast games (10PM ET = next day UTC) aren't skipped
+  const nowCT = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+  const today = `${nowCT.getFullYear()}-${String(nowCT.getMonth()+1).padStart(2,'0')}-${String(nowCT.getDate()).padStart(2,'0')}`;
+  const tomorrowUTC = new Date(Date.now() + 86400000).toISOString().split('T')[0];
 
-  const gameData = {}; // teamAbbrev → { total, eventId, winOdds }
+  const gameData = {};
   const eventList = [];
 
   for (const ev of Object.values(events)) {
-    if (!(ev.openDate || '').startsWith(today)) continue;
+    const od = ev.openDate || '';
+    // Include today's games AND tomorrow-UTC games that are actually tonight's late games
+    if (!od.startsWith(today) && !od.startsWith(tomorrowUTC)) continue;
+    // Filter out actual next-day games: if game starts after 10 AM CT next day, skip
+    if (od.startsWith(tomorrowUTC)) {
+      const gameHourUTC = parseInt(od.substring(11, 13)) || 0;
+      if (gameHourUTC >= 15) continue; // 15 UTC = 10 AM CT — that's tomorrow's slate
+    }
     const m = ev.name?.match(/^(.+?)\s*\(.+?\)\s*@\s*(.+?)\s*\(.+?\)$/);
     if (!m) continue;
     const away = TA[m[1].trim()] || m[1].trim();
@@ -131,8 +141,22 @@ async function getFDEvents() {
     gameData[home] = { total, eventId: ev.eventId, winOdds: homeML };
   }
 
-  console.log(`  ${eventList.length} MLB games today`);
-  return { eventList, gameData };
+  // Build pitcher → team map from FD event names (most reliable source)
+  // Event name: "Cleveland Guardians (T Bibee) @ Los Angeles Dodgers (S Ohtani)"
+  const pitcherTeamMap = new Map(); // "last_name_lower" → { team, fullInitial }
+  for (const ev of Object.values(events)) {
+    const pm = ev.name?.match(/^(.+?)\s*\(([A-Z])\s+(.+?)\)\s*@\s*(.+?)\s*\(([A-Z])\s+(.+?)\)$/);
+    if (!pm) continue;
+    const awayTeam = TA[pm[1].trim()] || '';
+    const homeTeam = TA[pm[4].trim()] || '';
+    const awayOpp  = homeTeam;
+    const homeOpp  = awayTeam;
+    if (awayTeam) pitcherTeamMap.set(pm[3].trim().toLowerCase(), { team: awayTeam, opponent: awayOpp, initial: pm[2] });
+    if (homeTeam) pitcherTeamMap.set(pm[6].trim().toLowerCase(), { team: homeTeam, opponent: homeOpp, initial: pm[5] });
+  }
+
+  console.log(`  ${eventList.length} MLB games today, ${pitcherTeamMap.size} pitchers identified`);
+  return { eventList, gameData, pitcherTeamMap };
 }
 
 // ─── 2. Get FD player props for all games ─────────────────────────────────────
@@ -304,7 +328,14 @@ async function scrapeRG() {
       currentAway = games[gameIdx].away; currentHome = games[gameIdx].home;
       teamState = 'awayPitcher'; gameIdx++; continue;
     }
-    const m1 = lines[i].match(/^(.+?)\s+\([LRS]\)\s+([\w\/]+)\s+\$([\d.]+)K$/i);
+    // Try single-line match: "Name (R) POS $X.XK"
+    let m1 = lines[i].match(/^(.+?)\s+\([LRS]\)\s+([\w\/]+)\s+\$([\d.]+)K$/i);
+    // Handle split-line: line i = "Name", line i+1 = "(R) POS $X.XK"
+    if (!m1 && i + 1 < lines.length) {
+      const combined = lines[i] + ' ' + lines[i + 1];
+      m1 = combined.match(/^(.+?)\s+\([LRS]\)\s+([\w\/]+)\s+\$([\d.]+)K$/i);
+      if (m1) i++; // skip the next line since we consumed it
+    }
     if (m1) {
       const isAway = teamState === 'awayPitcher' || teamState === 'awayBatters';
       const team = isAway ? currentAway : currentHome;
@@ -314,7 +345,12 @@ async function scrapeRG() {
       if (teamState === 'homePitcher') teamState = 'homeBatters';
       continue;
     }
-    const m2 = lines[i].match(/^(.+?)\s+(SP|RP|P)\s+\$([\d.]+)K$/i);
+    let m2 = lines[i].match(/^(.+?)\s+(SP|RP|P)\s+\$([\d.]+)K$/i);
+    if (!m2 && i + 1 < lines.length) {
+      const combined = lines[i] + ' ' + lines[i + 1];
+      m2 = combined.match(/^(.+?)\s+(SP|RP|P)\s+\$([\d.]+)K$/i);
+      if (m2) i++;
+    }
     if (m2) {
       const isAway = teamState === 'awayPitcher';
       const team = isAway ? currentAway : currentHome;
@@ -327,8 +363,23 @@ async function scrapeRG() {
     if (lines[i].match(/^vs\.?\s+/i) && teamState === 'awayBatters') teamState = 'homePitcher';
   }
 
-  console.log(`  RG: ${players.size} players`);
-  return players;
+  // Deduplicate: if same name appears multiple times, keep the one with highest salary
+  // Also clean up batting order prefixes like "1 Shohei Ohtani"
+  const cleaned = new Map();
+  for (const [name, p] of players) {
+    // Strip leading batting order number
+    const cleanName = name.replace(/^\d+\s+/, '').trim();
+    if (cleanName !== name) {
+      p.name = cleanName;
+    }
+    const key = cleanName;
+    if (!cleaned.has(key) || p.salary > cleaned.get(key).salary) {
+      cleaned.set(key, { ...p, name: cleanName });
+    }
+  }
+
+  console.log(`  RG: ${cleaned.size} players (deduped from ${players.size})`);
+  return cleaned;
 }
 
 // ─── 4. Scrape DFF for slate teams ────────────────────────────────────────────
@@ -359,11 +410,25 @@ async function scrapeDFF() {
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
 async function main() {
   // Run in parallel: RG + DFF + FD events
-  const [rg, dffTeams, { eventList, gameData }] = await Promise.all([
+  const [rg, dffTeams, { eventList, gameData, pitcherTeamMap }] = await Promise.all([
     scrapeRG(),
     scrapeDFF(),
     getFDEvents(),
   ]);
+
+  // Fix pitcher team assignments using FD event data (most reliable source)
+  let pitcherFixes = 0;
+  for (const [name, player] of rg) {
+    if (player.position !== 'P') continue;
+    const lastName = name.split(' ').pop().toLowerCase();
+    const fdPitcher = pitcherTeamMap.get(lastName);
+    if (fdPitcher && fdPitcher.team !== player.team) {
+      player.team = fdPitcher.team;
+      player.opponent = fdPitcher.opponent;
+      pitcherFixes++;
+    }
+  }
+  if (pitcherFixes > 0) console.log(`  Fixed ${pitcherFixes} pitcher team assignments via FD events`);
 
   // Get all FD props
   const fdProps = await getFDProps(eventList);
@@ -436,7 +501,8 @@ async function main() {
 
   // Clear and reload
   const hd = { 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' };
-  await fetch(`${SUPABASE_URL}/rest/v1/players`, { method: 'DELETE', headers: hd });
+  // PostgREST requires a filter for DELETE — use "id is not null" to match all rows
+  await fetch(`${SUPABASE_URL}/rest/v1/players?id=not.is.null`, { method: 'DELETE', headers: hd });
 
   for (let i = 0; i < rows.length; i += 50) {
     const chunk = rows.slice(i, i + 50);
