@@ -312,55 +312,99 @@ async function scrapeRG() {
     'KANSAS CITY':'KC','OAKLAND':'OAK','MIAMI':'MIA',
   };
 
+  // Parse game headers: "TIME ET" → next lines are CITY/TEAMNAME pairs
   const games = [];
   for (let i = 0; i < lines.length - 4; i++) {
     if (lines[i].match(/^\d{1,2}:\d{2}\s*(AM|PM)\s*ET$/i)) {
-      const away = TEAM_NAME_MAP[lines[i+2]] || CITY_MAP[lines[i+1]] || '';
-      const home = TEAM_NAME_MAP[lines[i+4]] || CITY_MAP[lines[i+3]] || '';
+      // Look ahead for two team name pairs (skip any non-team lines)
+      let away = '', home = '';
+      for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
+        const tn = TEAM_NAME_MAP[lines[j]];
+        const cn = CITY_MAP[lines[j]];
+        if (tn && !away) { away = tn; continue; }
+        if (tn && away && !home) { home = tn; break; }
+        if (cn && !away) { /* city line, next should be team name */ continue; }
+      }
       if (away && home) games.push({ lineIdx: i, away, home });
     }
   }
 
+  // Parse players: scan all lines for player patterns, use game headers for team context
   const players = new Map();
-  let currentAway = '', currentHome = '', teamState = 'awayPitcher', gameIdx = 0;
+  let currentAway = '', currentHome = '';
+  let teamState = 'awayPitcher'; // awayPitcher → awayBatters → homePitcher → homeBatters
+  let gameIdx = 0;
+
+  // Helper: try to match a player line (single or split across 2 lines)
+  function tryPlayerMatch(i) {
+    // Single line: "Name (R) POS $X.XK"
+    let m = lines[i].match(/^(.+?)\s+\([LRS]\)\s+([\w\/]+)\s+\$([\d.]+)K$/i);
+    if (m) return { name: m[1].trim(), position: m[2], salary: Math.round(parseFloat(m[3]) * 1000), skip: 0 };
+    // Split: "Name" + "(R) POS $X.XK"
+    if (i + 1 < lines.length) {
+      const combined = lines[i] + ' ' + lines[i + 1];
+      m = combined.match(/^(.+?)\s+\([LRS]\)\s+([\w\/]+)\s+\$([\d.]+)K$/i);
+      if (m) return { name: m[1].trim(), position: m[2], salary: Math.round(parseFloat(m[3]) * 1000), skip: 1 };
+    }
+    return null;
+  }
+
   for (let i = 0; i < lines.length; i++) {
+    // Check for game header transitions
     if (gameIdx < games.length && i >= games[gameIdx].lineIdx) {
-      currentAway = games[gameIdx].away; currentHome = games[gameIdx].home;
-      teamState = 'awayPitcher'; gameIdx++; continue;
-    }
-    // Try single-line match: "Name (R) POS $X.XK"
-    let m1 = lines[i].match(/^(.+?)\s+\([LRS]\)\s+([\w\/]+)\s+\$([\d.]+)K$/i);
-    // Handle split-line: line i = "Name", line i+1 = "(R) POS $X.XK"
-    if (!m1 && i + 1 < lines.length) {
-      const combined = lines[i] + ' ' + lines[i + 1];
-      m1 = combined.match(/^(.+?)\s+\([LRS]\)\s+([\w\/]+)\s+\$([\d.]+)K$/i);
-      if (m1) i++; // skip the next line since we consumed it
-    }
-    if (m1) {
-      const isAway = teamState === 'awayPitcher' || teamState === 'awayBatters';
-      const team = isAway ? currentAway : currentHome;
-      const opp = isAway ? currentHome : currentAway;
-      players.set(m1[1].trim(), { name: m1[1].trim(), position: m1[2], salary: Math.round(parseFloat(m1[3]) * 1000), team, opponent: opp });
-      if (teamState === 'awayPitcher') teamState = 'awayBatters';
-      if (teamState === 'homePitcher') teamState = 'homeBatters';
+      currentAway = games[gameIdx].away;
+      currentHome = games[gameIdx].home;
+      teamState = 'awayPitcher';
+      gameIdx++;
       continue;
     }
-    let m2 = lines[i].match(/^(.+?)\s+(SP|RP|P)\s+\$([\d.]+)K$/i);
-    if (!m2 && i + 1 < lines.length) {
-      const combined = lines[i] + ' ' + lines[i + 1];
-      m2 = combined.match(/^(.+?)\s+(SP|RP|P)\s+\$([\d.]+)K$/i);
-      if (m2) i++;
-    }
-    if (m2) {
-      const isAway = teamState === 'awayPitcher';
-      const team = isAway ? currentAway : currentHome;
-      const opp = isAway ? currentHome : currentAway;
-      players.set(m2[1].trim(), { name: m2[1].trim(), position: 'P', salary: Math.round(parseFloat(m2[3]) * 1000), team, opponent: opp });
-      if (teamState === 'awayPitcher') teamState = 'awayBatters';
-      if (teamState === 'homePitcher') teamState = 'homeBatters';
+
+    // Skip noise: weather, odds, forecast, precipitation, batting order numbers
+    if (lines[i].match(/^\d{1,2}(pm|am)$/i)) continue;  // "5pm", "6pm"
+    if (lines[i].match(/^\d{1,3}%$/)) continue;           // "16%"
+    if (lines[i].match(/^(View Forecast|PRECIPITATION|humidity|O\/U|CONFIRMED|LINEUP NOT RELEASED)/i)) continue;
+    if (lines[i].match(/^[NSEW]{1,3}\s+at\s+\d+\s*mph/i)) continue; // "SSW at 11 mph 81°"
+    if (lines[i].match(/^\d+\.\d+\s*\([+-]\d+\)$/)) continue;  // "4.41 (-126)" odds
+    if (lines[i].match(/^\d+(\.\d+)?$/) && parseFloat(lines[i]) < 20) continue; // "8.5" O/U or batting order "1"-"9"
+
+    // Transition markers between away batters and home pitcher
+    if (lines[i].match(/^vs\.?\s*/i) && teamState === 'awayBatters') {
+      teamState = 'homePitcher';
       continue;
     }
-    if (lines[i].match(/^vs\.?\s+/i) && teamState === 'awayBatters') teamState = 'homePitcher';
+    // "LINEUP NOT RELEASED" or "CONFIRMED" appears after the last away batter, before home pitcher
+    if ((lines[i] === 'LINEUP NOT RELEASED' || lines[i] === 'CONFIRMED') && teamState === 'awayBatters') {
+      teamState = 'homePitcher';
+      continue;
+    }
+
+    // Try to match a player
+    const pm = tryPlayerMatch(i);
+    if (pm) {
+      const isP = pm.position === 'P' || pm.position === 'SP' || pm.position === 'RP';
+      if (isP) pm.position = 'P';
+
+      let team, opp;
+      if (teamState === 'awayPitcher') {
+        team = currentAway; opp = currentHome;
+        teamState = 'awayBatters';
+      } else if (teamState === 'awayBatters' && isP) {
+        // A pitcher appearing during awayBatters = we've hit the home pitcher
+        team = currentHome; opp = currentAway;
+        teamState = 'homeBatters';
+      } else if (teamState === 'awayBatters') {
+        team = currentAway; opp = currentHome;
+      } else if (teamState === 'homePitcher') {
+        team = currentHome; opp = currentAway;
+        teamState = 'homeBatters';
+      } else {
+        team = currentHome; opp = currentAway;
+      }
+
+      players.set(pm.name, { name: pm.name, position: pm.position, salary: pm.salary, team, opponent: opp });
+      i += pm.skip; // skip consumed split line
+      continue;
+    }
   }
 
   // Deduplicate: if same name appears multiple times, keep the one with highest salary
