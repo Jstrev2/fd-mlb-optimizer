@@ -14,6 +14,7 @@
 
 const puppeteer = require('puppeteer-core');
 const { calcB, calcP } = require('./scoring.cjs');
+const { getStatsByName, computeBatterFallback, computePitcherFallback } = require('./fallback-stats.cjs');
 
 const SUPABASE_URL = 'https://udwafzawzeaoteghfwjq.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkd2FmemF3emVhb3RlZ2hmd2pxIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NDM4Mjc1MCwiZXhwIjoyMDg5OTU4NzUwfQ.dbO_BZfeb6X2cBbPyr6cyrJC_SRwSC_Qr9ikn1W1_nc';
@@ -502,6 +503,64 @@ async function main() {
   // Get all FD props
   const fdProps = await getFDProps(eventList);
 
+  // ─── Fallback: fill missing props from MLB Stats API ──────────────────────
+  console.log('Filling missing props from MLB Stats API...');
+  let fallbackFills = 0;
+  let fallbackPlayers = 0;
+
+  // Identify players who need fallback data
+  const needsFallback = [];
+  for (const rp of rgPlayers) {
+    const pr = fm(rp.name, fdProps);
+    const isP = rp.position === 'P';
+    
+    // Check what's missing
+    let needsIt = false;
+    if (!pr || Object.keys(pr || {}).filter(k => k !== 'game_total' && k !== '_fallback').length === 0) {
+      needsIt = true; // No FD props at all
+    } else if (isP) {
+      if (!pr.outs_line || !pr.er_line) needsIt = true; // Missing outs or ER
+    } else {
+      if (!pr.bb_odds) needsIt = true; // Missing BB (common)
+    }
+    
+    if (needsIt) needsFallback.push(rp);
+  }
+
+  console.log(`  ${needsFallback.length} players need fallback data`);
+
+  // Fetch stats in batches of 5 (rate-limit friendly)
+  for (let i = 0; i < needsFallback.length; i += 5) {
+    const batch = needsFallback.slice(i, i + 5);
+    const results = await Promise.all(batch.map(async (rp) => {
+      const stats = await getStatsByName(rp.name);
+      return { rp, stats };
+    }));
+    
+    for (const { rp, stats } of results) {
+      if (!stats) continue;
+      const isP = rp.position === 'P';
+      const fb = isP ? computePitcherFallback(stats.pitching) : computeBatterFallback(stats.batting);
+      if (!fb) continue;
+      
+      // Get or create props entry
+      let pr = fm(rp.name, fdProps);
+      if (!pr) {
+        pr = { _fallback: true };
+        fdProps.set(rp.name, pr);
+      }
+      
+      // Fill ALL missing fields from fallback
+      let filled = 0;
+      for (const [key, val] of Object.entries(fb)) {
+        if (!pr[key] && val) { pr[key] = val; filled++; }
+      }
+      if (filled > 0) { fallbackFills += filled; fallbackPlayers++; }
+    }
+  }
+  
+  if (fallbackFills > 0) console.log(`  Fallback: filled ${fallbackFills} props for ${fallbackPlayers} players from MLB season stats`);
+
   // Determine slate teams (prefer DFF, fall back to RG)
   const slateTeams = dffTeams.size > 0 ? dffTeams : new Set([...rg.values()].map(p => p.team).filter(Boolean));
   console.log(`  Slate teams: ${[...slateTeams].sort().join(', ')} (${slateTeams.size} teams)`);
@@ -561,7 +620,7 @@ async function main() {
       // Scores
       projected_pts: pts.projected, upside_pts: pts.upside,
       pts_per_k: rp.salary > 0 ? Math.round((pts.upside / (rp.salary / 1000)) * 10) / 10 : 0,
-      odds_source: hasOdds ? 'fanduel' : 'none',
+      odds_source: pr._fallback ? 'mlb-stats-fallback' : (hasOdds ? 'fanduel' : 'none'),
       slate_id: 'main',
     });
   }
