@@ -66,12 +66,24 @@ async function getFDGames() {
   const r = await fetch(`${FD_API}/content-managed-page?page=SPORT&eventTypeId=7511&_ak=${AK}&timezone=America/New_York`, { headers: { 'User-Agent': UA } });
   const d = await r.json();
   const events = d?.attachments?.events || {};
-  const today = new Date().toISOString().split('T')[0];
-  
+
+  // Use ET for "today" to match FD/DFF slate dates
+  const nowET = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const today = `${nowET.getFullYear()}-${String(nowET.getMonth()+1).padStart(2,'0')}-${String(nowET.getDate()).padStart(2,'0')}`;
+  const tomorrowUTC = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+
   return Object.entries(events)
     .filter(([, ev]) => {
       const od = ev.openDate || '';
-      return od >= today && ev.name?.includes('@') && ev.name?.includes('(');
+      if (!ev.name?.includes('@') || !ev.name?.includes('(')) return false;
+      // Include today's games + tomorrow-UTC games that are tonight's late games
+      if (od.startsWith(today)) return true;
+      if (od.startsWith(tomorrowUTC)) {
+        // Only include if game starts before 10 AM ET (= late night game from tonight)
+        const hourUTC = parseInt(od.substring(11, 13)) || 0;
+        return hourUTC < 15; // 15 UTC = 10 AM ET
+      }
+      return false;
     })
     .map(([id, ev]) => {
       const m = ev.name.match(/^(.+?)\s*\(.+?\)\s*@\s*(.+?)\s*\(.+?\)$/);
@@ -98,18 +110,20 @@ function resolveSlateTeams(dffSlates, fdGames) {
     
     if (st.includes('all day') || st.includes('all')) {
       games = sorted;
-    } else if (st.includes('after hours')) {
-      games = sorted.slice(-s.games);
-    } else if (st.includes('early')) {
-      games = sorted.slice(0, s.games);
-    } else if (st.includes('late')) {
-      const ahCount = dffSlates.find(x => x.slateType?.includes('after hours'))?.games || 0;
-      const end = sorted.length - ahCount;
-      games = sorted.slice(Math.max(0, end - s.games), end);
-    } else if (st.includes('main')) {
-      games = sorted.slice(0, s.games);
     } else {
-      games = sorted.slice(0, s.games);
+      // For all other slates: take the last N games by start time
+      // This works because DFF slates are ordered by lock time:
+      //   Early = first N, Main = last N (everything from lock time on),
+      //   After Hours = last N, Express = subset
+      // The key insight: if a slate says "10 games" starting at 7:07 PM,
+      // those are the 10 games that start at/after 7:07 PM (the last 10 by time)
+      // Exception: "Early Only" takes the FIRST N games
+      if (st.includes('early')) {
+        games = sorted.slice(0, s.games);
+      } else {
+        // Main, After Hours, Express, Late — all take from the end
+        games = sorted.slice(sorted.length - s.games);
+      }
     }
     
     const teams = [...new Set(games.flatMap(g => [g.away, g.home]))];
