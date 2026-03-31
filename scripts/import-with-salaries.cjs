@@ -384,12 +384,19 @@ async function scrapeRG() {
       const isP = pm.position === 'P' || pm.position === 'SP' || pm.position === 'RP';
       if (isP) pm.position = 'P';
 
+      // Strip PLR: prefix (platoon/alternate pitcher listings)
+      const isPLR = pm.name.startsWith('PLR:');
+      if (isPLR) pm.name = pm.name.replace(/^PLR:\s*/, '').trim();
+      // PLR pitchers are alternates — don't use them to trigger team transitions
+      // but still add them to the player pool
+
       let team, opp;
       if (teamState === 'awayPitcher') {
         team = currentAway; opp = currentHome;
         teamState = 'awayBatters';
-      } else if (teamState === 'awayBatters' && isP) {
-        // A pitcher appearing during awayBatters = we've hit the home pitcher
+      } else if (teamState === 'awayBatters' && isP && !isPLR) {
+        // A real pitcher appearing during awayBatters = we've hit the home pitcher
+        // (PLR entries are alternates, not the start of the home lineup)
         team = currentHome; opp = currentAway;
         teamState = 'homeBatters';
       } else if (teamState === 'awayBatters') {
@@ -401,29 +408,35 @@ async function scrapeRG() {
         team = currentHome; opp = currentAway;
       }
 
-      players.set(pm.name, { name: pm.name, position: pm.position, salary: pm.salary, team, opponent: opp });
+      // Use name+team key so same-named players on diff teams both survive
+      const mapKey = `${pm.name}|${team}`;
+      players.set(mapKey, { name: pm.name, position: pm.position, salary: pm.salary, team, opponent: opp });
       i += pm.skip; // skip consumed split line
       continue;
     }
   }
 
-  // Deduplicate: if same name appears multiple times, keep the one with highest salary
-  // Also clean up batting order prefixes like "1 Shohei Ohtani"
-  const cleaned = new Map();
-  for (const [name, p] of players) {
-    // Strip leading batting order number
-    const cleanName = name.replace(/^\d+\s+/, '').trim();
-    if (cleanName !== name) {
-      p.name = cleanName;
-    }
-    const key = cleanName;
-    if (!cleaned.has(key) || p.salary > cleaned.get(key).salary) {
-      cleaned.set(key, { ...p, name: cleanName });
+  // Clean up names and deduplicate
+  // Key by name+team so same-named players on diff teams survive (Max Muncy on OAK/LAD)
+  const dedupMap = new Map(); // "name|team" → player
+  for (const [, p] of players) {
+    p.name = p.name.replace(/^\d+\s+/, '').trim(); // strip batting order prefix
+    const key = `${p.name}|${p.team}`;
+    if (!dedupMap.has(key) || p.salary > dedupMap.get(key).salary) {
+      dedupMap.set(key, p);
     }
   }
+  // Rebuild a name-keyed Map for fm() matching, but store in an array for iteration
+  const cleaned = new Map();
+  const playerList = [...dedupMap.values()];
+  for (const p of playerList) {
+    // If name already exists (dup across teams), keep both — fm() will match the first one
+    // but we iterate the array for final output, not the Map
+    if (!cleaned.has(p.name)) cleaned.set(p.name, p);
+  }
 
-  console.log(`  RG: ${cleaned.size} players (deduped from ${players.size})`);
-  return cleaned;
+  console.log(`  RG: ${playerList.length} players (deduped from ${players.size}), name map: ${cleaned.size}`);
+  return { playerList, nameMap: cleaned };
 }
 
 // ─── 4. Scrape DFF for slate teams ────────────────────────────────────────────
@@ -454,15 +467,17 @@ async function scrapeDFF() {
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
 async function main() {
   // Run in parallel: RG + DFF + FD events
-  const [rg, dffTeams, { eventList, gameData, pitcherTeamMap }] = await Promise.all([
+  const [rgResult, dffTeams, { eventList, gameData, pitcherTeamMap }] = await Promise.all([
     scrapeRG(),
     scrapeDFF(),
     getFDEvents(),
   ]);
+  const { playerList: rgPlayers, nameMap: rg } = rgResult;
 
   // Fix pitcher team assignments using FD event data (most reliable source)
   let pitcherFixes = 0;
-  for (const [name, player] of rg) {
+  for (const player of rgPlayers) {
+    const name = player.name;
     if (player.position !== 'P') continue;
     const lastName = name.split(' ').pop().toLowerCase();
     const fdPitcher = pitcherTeamMap.get(lastName);
@@ -485,7 +500,8 @@ async function main() {
   const rows = [];
   let withProps = 0, skipped = 0;
 
-  for (const [name, rp] of rg) {
+  for (const rp of rgPlayers) {
+    const name = rp.name;
     if (slateTeams.size > 0 && rp.team && !slateTeams.has(rp.team)) { skipped++; continue; }
 
     const pr = fm(name, fdProps) || {};
