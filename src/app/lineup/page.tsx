@@ -5,6 +5,7 @@ import { SALARY_CAP, MAX_PER_TEAM, STACK_FRAMEWORKS, LineupSlot, OptimizerConfig
 import { getSelectedSlate, subscribeSlate } from "@/lib/slateContext";
 import { solve } from "@/lib/optimizer";
 import BottomNav from "@/components/BottomNav";
+import PlayerDetail from "@/components/PlayerDetail";
 import { motion } from "framer-motion";
 import { Zap, DollarSign, TrendingUp, Target, CloudOff, Layers, Loader2, Cpu, ChevronDown, Calendar } from "lucide-react";
 import { setSelectedSlate as persistSlate } from "@/lib/slateContext";
@@ -24,6 +25,7 @@ export default function LineupPage() {
   const [slateLabel, setSlateLabel] = useState<string>("All Games");
   const [slates, setSlates] = useState<{ id: string; label: string; games: number; lockTime: string; teams: string[]; type?: string }[]>([]);
   const [slateDropOpen, setSlateDropOpen] = useState(false);
+  const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
 
   const changeSlate = async (id: string) => {
     setSelectedSlateLocal(id);
@@ -344,7 +346,7 @@ export default function LineupPage() {
                 <div className="flex items-center gap-3">
                   <span className="text-[10px] font-bold text-zinc-500 bg-white/5 px-2 py-0.5 rounded w-10 text-center">{slot.position}</span>
                   {slot.player ? (
-                    <div>
+                    <div className="cursor-pointer hover:text-emerald-400 transition-colors" onClick={() => setSelectedPlayer(slot.player)}>
                       <p className="font-bold text-sm">{slot.player.name}</p>
                       <p className="text-[10px] text-zinc-500">{slot.player.team} · {slot.player.position}</p>
                     </div>
@@ -373,6 +375,7 @@ export default function LineupPage() {
         </div>
       )}
 
+      {selectedPlayer && <PlayerDetail player={selectedPlayer} onClose={() => setSelectedPlayer(null)} />}
       <BottomNav />
     </main>
   );
