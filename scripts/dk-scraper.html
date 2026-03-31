@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>DK Props Scraper</title>
+  <style>
+    body { background: #111; color: #eee; font-family: system-ui; padding: 2rem; max-width: 700px; margin: 0 auto; }
+    h1 { color: #4ade80; }
+    .step { background: #1a1a2e; border: 1px solid #333; border-radius: 12px; padding: 1.5rem; margin: 1rem 0; }
+    .step h3 { color: #4ade80; margin-top: 0; }
+    code { background: #222; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+    a.bookmarklet { display: inline-block; background: #4ade80; color: #000; font-weight: bold; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-size: 16px; cursor: grab; }
+    a.bookmarklet:hover { background: #22c55e; }
+    #status { margin-top: 1rem; padding: 1rem; border-radius: 8px; display: none; }
+    .success { background: #064e3b; border: 1px solid #4ade80; display: block !important; }
+    .error { background: #450a0a; border: 1px solid #ef4444; display: block !important; }
+    .info { background: #1e293b; border: 1px solid #3b82f6; display: block !important; }
+    pre { background: #0a0a0a; padding: 1rem; border-radius: 8px; overflow-x: auto; font-size: 11px; max-height: 300px; overflow-y: auto; }
+    .drag-hint { color: #888; font-size: 12px; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <h1>⚾ DK Props Scraper</h1>
+  <p>Scrapes DraftKings MLB pitcher props (earned runs, outs, Ks) and pushes to Supabase.</p>
+
+  <div class="step">
+    <h3>Step 1: Drag this to your bookmarks bar</h3>
+    <p>
+      <a class="bookmarklet" href="javascript:void(function(){const SUPABASE_URL='https://udwafzawzeaoteghfwjq.supabase.co';const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkd2FmemF3emVhb3RlZ2hmd2pxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzODI3NTAsImV4cCI6MjA4OTk1ODc1MH0.9Y-4XLE_qrfONurb6x1VxOl9lHbZY3eCgVtJEjvx2is';if(!location.href.includes('draftkings.com')){alert('Navigate to DraftKings MLB pitcher props first!');return;}const props={};document.querySelectorAll('[class*=sportsbook-event-accordion],[class*=parlay-card-10]').forEach(function(section){try{const header=section.querySelector('[class*=event-cell__name],.sportsbook-event-accordion__title');const game=header?header.textContent.trim():'';section.querySelectorAll('[class*=sportsbook-outcome-cell],[class*=component-205]').forEach(function(cell){try{const label=cell.querySelector('[class*=outcome-label],[class*=sportsbook-outcome-cell__label]');const line=cell.querySelector('[class*=outcome-line],[class*=sportsbook-outcome-cell__line]');const odds=cell.querySelector('[class*=outcome-odds],[class*=sportsbook-odds]');if(label){const name=label.textContent.trim();const l=line?line.textContent.trim():'';const o=odds?odds.textContent.trim():'';if(!props[name])props[name]={};if(l)props[name].line=l;if(o)props[name].odds=o;props[name].game=game;}}catch(e){}});;}catch(e){}});const count=Object.keys(props).length;if(count===0){const allText=document.body.innerText;const lines=allText.split('\\n').filter(function(l){return l.trim();});const results=[];for(let i=0;i<lines.length;i++){const m=lines[i].match(/^([A-Z][a-z]+(?:\\s[A-Z][a-z]+)+)$/);if(m){const name=m[1];for(let j=i+1;j<Math.min(i+5,lines.length);j++){const om=lines[j].match(/^([OoUu]|Over|Under)\\s*([\\d.]+)$/i);const oddsM=lines[j].match(/^([+-]\\d+)$/);if(om){if(!props[name])props[name]={};props[name].line=om[2];};if(oddsM){if(!props[name])props[name]={};props[name].odds=oddsM[1];}}}}};const finalCount=Object.keys(props).length;const category=new URLSearchParams(location.search).get('subcategory')||'unknown';const payload={id:'dk-'+category+'-'+new Date().toISOString().split('T')[0],date:new Date().toISOString().split('T')[0],category:category,data:props,player_count:finalCount,scraped_at:new Date().toISOString()};fetch(SUPABASE_URL+'/rest/v1/dk_props',{method:'POST',headers:{'Authorization':'Bearer '+SUPABASE_KEY,'apikey':SUPABASE_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify(payload)}).then(function(r){if(r.ok){alert('✅ Scraped '+finalCount+' '+category+' props and pushed to Supabase!');}else{r.text().then(function(t){alert('Error pushing to Supabase: '+t);});}}).catch(function(e){alert('Error: '+e.message);});}());">
+        📥 Scrape DK Props
+      </a>
+    </p>
+    <p class="drag-hint">↑ Drag this green button to your bookmarks bar (or right-click → Bookmark This Link)</p>
+  </div>
+
+  <div class="step">
+    <h3>Step 2: Navigate to DK props pages</h3>
+    <p>Open these pages one at a time and click the bookmarklet on each:</p>
+    <ul>
+      <li><a href="https://sportsbook.draftkings.com/leagues/baseball/mlb?category=pitcher-props&subcategory=earned-runs" target="_blank" style="color:#60a5fa">Pitcher Earned Runs</a></li>
+      <li><a href="https://sportsbook.draftkings.com/leagues/baseball/mlb?category=pitcher-props&subcategory=outs" target="_blank" style="color:#60a5fa">Pitcher Outs Recorded</a></li>
+      <li><a href="https://sportsbook.draftkings.com/leagues/baseball/mlb?category=pitcher-props&subcategory=walks-allowed" target="_blank" style="color:#60a5fa">Pitcher Walks Allowed</a></li>
+      <li><a href="https://sportsbook.draftkings.com/leagues/baseball/mlb?category=pitcher-props&subcategory=hits-allowed" target="_blank" style="color:#60a5fa">Pitcher Hits Allowed</a></li>
+    </ul>
+    <p style="color:#888;font-size:13px">Each click scrapes the page and pushes to Supabase. Then hit Import in the optimizer app.</p>
+  </div>
+
+  <div class="step">
+    <h3>How it works</h3>
+    <ol style="color:#aaa;font-size:13px">
+      <li>You open DK in your browser (residential IP = no block)</li>
+      <li>Click the bookmarklet — it reads the props from the page DOM</li>
+      <li>Pushes the data to Supabase <code>dk_props</code> table</li>
+      <li>Our import script picks up the DK data and merges it with FD props</li>
+    </ol>
+  </div>
+</body>
+</html>
