@@ -41,14 +41,16 @@ export default function PlayersPage() {
       if (data.slates && data.slates.length > 0) {
         setSlates(data.slates);
         // Auto-select the biggest classic slate (All Day) if none selected
-        setSelectedSlateState(prev => {
+        setSelectedSlateState(() => {
           const current = getSelectedSlate();
-          if (current !== "all") return current; // respect whatever's stored
-          // Default to Main slate, then All Day, then first classic
+          // Check if stored slate still exists in today's data
+          const stillValid = current !== "all" && data.slates.some((s: Slate) => s.id === current);
+          if (stillValid) return current;
+          // Default: Main > All Day > first classic
           const main = data.slates.find((s: Slate) => s.label?.toLowerCase().includes("main") && s.type === "classic");
           const allDay = data.slates.find((s: Slate) => s.label?.toLowerCase().includes("all day") && s.type === "classic");
           const firstClassic = data.slates.find((s: Slate) => s.type === "classic");
-          const next = main?.id || allDay?.id || firstClassic?.id || prev;
+          const next = main?.id || allDay?.id || firstClassic?.id || "all";
           persistSlate(next);
           return next;
         });
