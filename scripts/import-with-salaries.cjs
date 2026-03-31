@@ -435,8 +435,18 @@ async function scrapeRG() {
     if (!cleaned.has(p.name)) cleaned.set(p.name, p);
   }
 
-  console.log(`  RG: ${playerList.length} players (deduped from ${players.size}), name map: ${cleaned.size}`);
-  return { playerList, nameMap: cleaned };
+  // Remove batter entries for players who are also listed as P on the same team
+  // (e.g., Ohtani on pitching days — FD doesn't let you roster him as a batter)
+  const pitcherNames = new Set(playerList.filter(p => p.position === 'P').map(p => `${p.name}|${p.team}`));
+  const filtered = playerList.filter(p => {
+    if (p.position === 'P') return true;
+    return !pitcherNames.has(`${p.name}|${p.team}`);
+  });
+  const removed = playerList.length - filtered.length;
+  if (removed > 0) console.log(`  Removed ${removed} batter entries for active pitchers (e.g., Ohtani)`);
+
+  console.log(`  RG: ${filtered.length} players (deduped from ${players.size}), name map: ${cleaned.size}`);
+  return { playerList: filtered, nameMap: cleaned };
 }
 
 // ─── 4. Scrape DFF for slate teams ────────────────────────────────────────────
