@@ -176,6 +176,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           totalProps += count;
           chrome.runtime.sendMessage({ action: 'progress', index: i, status: count + ' found', class: 'done' });
         } else {
+          // Dump raw text sample to Supabase so we can fix the parser
+          await pushToSupabase(category + '-debug', { _rawSample: debug.sample, _lineCount: debug.lineCount });
           chrome.runtime.sendMessage({ action: 'progress', index: i, status: '0 (' + debug.lineCount + ' lines)', class: 'error' });
         }
       } catch (e) {
