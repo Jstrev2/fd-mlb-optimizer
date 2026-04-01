@@ -7,25 +7,35 @@ function scraperFunction() {
   const lines = text.split('\n').map(l => l.trim()).filter(l => l);
   const props = {};
 
+  // Debug: capture raw text sample
+  const debug = { lineCount: lines.length, sample: lines.slice(0, 50), blocked: text.includes('Access Denied') };
+
+  if (debug.blocked || lines.length < 20) {
+    return { props: {}, debug };
+  }
+
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
 
-    if (l === 'Over' || l === 'Under' || l === 'O' || l === 'U') {
-      const direction = (l === 'Over' || l === 'O') ? 'over' : 'under';
+    // Match Over/Under with various formats DK uses
+    if (/^(Over|Under|O |U )$/i.test(l) || l === 'O' || l === 'U') {
+      const direction = /^(Over|O)/i.test(l) ? 'over' : 'under';
       let name = '', line = '', odds = '';
-      for (let j = i - 1; j >= Math.max(0, i - 10); j--) {
-        if (lines[j].match(/^[A-Z][a-z]+\.?\s+[A-Z][a-z]+/) &&
-            !lines[j].match(/^(Over|Under|O|U)$/i) &&
-            !lines[j].match(/^[+-]\d+$/) &&
-            !lines[j].match(/^\d+(\.\d+)?$/) &&
-            !lines[j].match(/^(SGP|ML|Alt|Total|1st|2nd|3rd|Game|AT|@|More|Fewer|Less)/i)) {
-          name = lines[j].trim();
+      // Look backward for player name
+      for (let j = i - 1; j >= Math.max(0, i - 12); j--) {
+        const prev = lines[j];
+        if (prev.match(/^[A-Z][a-z]+\.?\s+[A-Z][a-z]/) &&
+            !prev.match(/^(Over|Under|O|U|SGP|ML|Alt|Total|1st|2nd|3rd|Game|AT|More|Fewer|Less|Earned|Outs|Strikeout|Walk|Hit|Run|Base|Steal)/i) &&
+            !prev.match(/^[+-]\d/) &&
+            !prev.match(/^\d+(\.\d)?$/)) {
+          name = prev.trim();
           break;
         }
       }
-      for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
+      // Look forward for line and odds
+      for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
         if (!line && lines[j].match(/^\d+(\.\d+)?$/)) line = lines[j];
-        if (!odds && lines[j].match(/^[+-]\d+$/)) odds = lines[j];
+        if (!odds && lines[j].match(/^[\u2212+-]\d+$/)) odds = lines[j].replace('\u2212', '-');
         if (line && odds) break;
       }
       if (name) {
@@ -36,20 +46,21 @@ function scraperFunction() {
       continue;
     }
 
+    // Alt lines: "2 or Fewer", "3 or More", etc
     const altMatch = l.match(/^(\d+)\s+or\s+(Fewer|More|Less)$/i);
     if (altMatch) {
       const threshold = parseInt(altMatch[1]);
       const dir = altMatch[2].toLowerCase();
       let name = '', odds = '';
-      for (let j = i - 1; j >= Math.max(0, i - 10); j--) {
-        if (lines[j].match(/^[A-Z][a-z]+\.?\s+[A-Z][a-z]+/) &&
-            !lines[j].match(/^(Over|Under|O|U|\d|[+-]|SGP|ML|Alt|Total|Game|AT|@|More|Fewer|Less)/i)) {
+      for (let j = i - 1; j >= Math.max(0, i - 12); j--) {
+        if (lines[j].match(/^[A-Z][a-z]+\.?\s+[A-Z][a-z]/) &&
+            !lines[j].match(/^(Over|Under|O|U|\d|[+-]|SGP|ML|Alt|Total|Game|AT|More|Fewer|Less|Earned|Outs)/i)) {
           name = lines[j].trim();
           break;
         }
       }
-      for (let j = i + 1; j < Math.min(i + 3, lines.length); j++) {
-        if (lines[j].match(/^[+-]\d+$/)) { odds = lines[j]; break; }
+      for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+        if (lines[j].match(/^[\u2212+-]\d+$/)) { odds = lines[j].replace('\u2212', '-'); break; }
       }
       if (name && odds) {
         if (!props[name]) props[name] = {};
@@ -59,7 +70,8 @@ function scraperFunction() {
       }
     }
   }
-  return props;
+
+  return { props, debug: { ...debug, propsFound: Object.keys(props).length } };
 }
 
 async function pushToSupabase(category, props) {
@@ -129,22 +141,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           func: scraperFunction,
         });
 
-        const props = results[0]?.result || {};
+        const result = results[0]?.result || { props: {}, debug: {} };
+        const props = result.props || {};
+        const debug = result.debug || {};
         const count = Object.keys(props).length;
 
-        // Determine category from URL
+        console.log(`[FD Optimizer] Page ${i}:`, debug);
+
         const urlParams = new URL(page.url).searchParams;
         const category = urlParams.get('subcategory') || 'unknown';
 
-        if (count > 0) {
+        if (debug.blocked) {
+          chrome.runtime.sendMessage({ action: 'progress', index: i, status: 'BLOCKED', class: 'error' });
+        } else if (count > 0) {
           const res = await pushToSupabase(category, props);
           totalProps += count;
-          chrome.runtime.sendMessage({ action: 'progress', index: i, status: `✅ ${count}`, class: 'done' });
+          chrome.runtime.sendMessage({ action: 'progress', index: i, status: count + ' found', class: 'done' });
         } else {
-          chrome.runtime.sendMessage({ action: 'progress', index: i, status: '0 found', class: 'error' });
+          chrome.runtime.sendMessage({ action: 'progress', index: i, status: '0 (' + debug.lineCount + ' lines)', class: 'error' });
         }
       } catch (e) {
-        chrome.runtime.sendMessage({ action: 'progress', index: i, status: '❌ ' + e.message.substring(0, 20), class: 'error' });
+        chrome.runtime.sendMessage({ action: 'progress', index: i, status: 'ERR: ' + e.message.substring(0, 30), class: 'error' });
       }
     }
 
