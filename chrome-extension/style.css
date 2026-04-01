@@ -1,0 +1,32 @@
+#fd-scrape-btn {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 999999;
+  background: linear-gradient(135deg, #4ade80, #22c55e);
+  color: #000;
+  border: none;
+  padding: 14px 24px;
+  border-radius: 50px;
+  font-size: 16px;
+  font-weight: 900;
+  cursor: pointer;
+  box-shadow: 0 4px 20px rgba(74, 222, 128, 0.4);
+  font-family: system-ui, -apple-system, sans-serif;
+  transition: all 0.2s;
+}
+#fd-scrape-btn:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 30px rgba(74, 222, 128, 0.6);
+}
+#fd-scrape-btn.running {
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  pointer-events: none;
+}
+#fd-scrape-btn.done {
+  background: linear-gradient(135deg, #4ade80, #10b981);
+}
+#fd-scrape-btn.error {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  color: #fff;
+}

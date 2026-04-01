@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "FD Optimizer - DK Scraper",
+  "version": "1.0",
+  "description": "One-click DraftKings prop scraper for the FD MLB Optimizer",
+  "permissions": ["activeTab", "scripting"],
+  "content_scripts": [
+    {
+      "matches": ["*://sportsbook.draftkings.com/*"],
+      "js": ["scraper.js"],
+      "css": ["style.css"]
+    }
+  ],
+  "icons": {
+    "48": "icon.png"
+  }
+}
