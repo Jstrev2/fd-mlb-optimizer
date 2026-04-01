@@ -1,16 +1,17 @@
 {
   "manifest_version": 3,
   "name": "FD Optimizer - DK Scraper",
-  "version": "1.0",
-  "description": "One-click DraftKings prop scraper for the FD MLB Optimizer",
-  "permissions": ["activeTab", "scripting"],
-  "content_scripts": [
-    {
-      "matches": ["*://sportsbook.draftkings.com/*"],
-      "js": ["scraper.js"],
-      "css": ["style.css"]
-    }
-  ],
+  "version": "2.0",
+  "description": "One-click: scrapes ALL DraftKings MLB props and pushes to Supabase",
+  "permissions": ["activeTab", "scripting", "tabs"],
+  "host_permissions": ["*://sportsbook.draftkings.com/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icon.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
   "icons": {
     "48": "icon.png"
   }

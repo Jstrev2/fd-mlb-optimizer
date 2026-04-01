@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { width: 320px; background: #111; color: #eee; font-family: system-ui; padding: 16px; margin: 0; }
+    h2 { color: #4ade80; margin: 0 0 12px 0; font-size: 16px; }
+    #scrape-btn {
+      width: 100%; padding: 14px; border: none; border-radius: 12px;
+      background: linear-gradient(135deg, #4ade80, #22c55e);
+      color: #000; font-size: 16px; font-weight: 900; cursor: pointer;
+      font-family: system-ui; transition: all 0.2s;
+    }
+    #scrape-btn:hover { transform: scale(1.02); }
+    #scrape-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    #status { margin-top: 12px; font-size: 12px; color: #888; }
+    .category { display: flex; justify-content: space-between; padding: 4px 0; font-size: 11px; border-bottom: 1px solid #222; }
+    .category .name { color: #aaa; }
+    .category .result { font-weight: bold; }
+    .result.done { color: #4ade80; }
+    .result.running { color: #fbbf24; }
+    .result.error { color: #ef4444; }
+    .result.waiting { color: #555; }
+    #categories { margin-top: 10px; }
+    .footer { margin-top: 12px; font-size: 10px; color: #555; text-align: center; }
+  </style>
+</head>
+<body>
+  <h2>⚾ DK Props Scraper</h2>
+  <button id="scrape-btn" onclick="scrapeAll()">Scrape ALL Props</button>
+  <div id="categories"></div>
+  <div id="status"></div>
+  <div class="footer">Pushes to Supabase → Import in optimizer</div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
