@@ -418,11 +418,13 @@ async function scrapeRG() {
   }
 
   // Clean up names and deduplicate
-  // Key by name+team so same-named players on diff teams survive (Max Muncy on OAK/LAD)
-  const dedupMap = new Map(); // "name|team" → player
+  // Key by name+team+posType so P and batter entries for same player both survive
+  // (Ohtani has both a P entry and a batter entry on FD)
+  const dedupMap = new Map();
   for (const [, p] of players) {
-    p.name = p.name.replace(/^\d+\s+/, '').trim(); // strip batting order prefix
-    const key = `${p.name}|${p.team}`;
+    p.name = p.name.replace(/^\d+\s+/, '').trim();
+    const posType = p.position === 'P' ? 'P' : 'B';
+    const key = `${p.name}|${p.team}|${posType}`;
     if (!dedupMap.has(key) || p.salary > dedupMap.get(key).salary) {
       dedupMap.set(key, p);
     }
@@ -485,20 +487,40 @@ async function main() {
   ]);
   const { playerList: rgPlayers, nameMap: rg } = rgResult;
 
-  // Fix pitcher team assignments using FD event data (most reliable source)
-  let pitcherFixes = 0;
+  // Build set of ACTUAL starting pitchers from FD events (source of truth)
+  // pitcherTeamMap: lastName → { team, opponent, initial }
+  const actualPitcherNames = new Set();
+  for (const [lastName, info] of pitcherTeamMap) {
+    actualPitcherNames.add(lastName);
+  }
+  console.log(`  Actual starting pitchers: ${actualPitcherNames.size} (from FD events)`);
+
+  // Fix pitcher assignments: 
+  // 1. If RG says position=P but FD doesn't list them as today's starter → change to batter
+  // 2. If RG says position=P and FD agrees → fix team if needed
+  let pitcherFixes = 0, pitcherDemotions = 0;
   for (const player of rgPlayers) {
     const name = player.name;
     if (player.position !== 'P') continue;
     const lastName = name.split(' ').pop().toLowerCase();
     const fdPitcher = pitcherTeamMap.get(lastName);
-    if (fdPitcher && fdPitcher.team !== player.team) {
-      player.team = fdPitcher.team;
-      player.opponent = fdPitcher.opponent;
-      pitcherFixes++;
+    
+    if (fdPitcher) {
+      // FD confirms this person is a starting pitcher today — fix team if needed
+      if (fdPitcher.team !== player.team) {
+        player.team = fdPitcher.team;
+        player.opponent = fdPitcher.opponent;
+        pitcherFixes++;
+      }
+    } else {
+      // RG lists as P but FD says they're NOT starting today (e.g., Ohtani on non-pitching day)
+      // Demote to batter — change position so they get batter scoring
+      player.position = '1B'; // default batter pos for two-way players
+      pitcherDemotions++;
     }
   }
   if (pitcherFixes > 0) console.log(`  Fixed ${pitcherFixes} pitcher team assignments via FD events`);
+  if (pitcherDemotions > 0) console.log(`  Demoted ${pitcherDemotions} non-starting pitchers to batters (e.g., Ohtani on off-day)`);
 
   // Get all FD props
   const fdProps = await getFDProps(eventList);
