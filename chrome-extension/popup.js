@@ -12,6 +12,8 @@ const PAGES = [
   { url: 'https://sportsbook.draftkings.com/leagues/baseball/mlb?category=batter-props&subcategory=stolen-bases', name: 'Batter SB' },
 ];
 
+document.getElementById('scrape-btn').addEventListener('click', scrapeAll);
+
 // Build the category list UI
 const catDiv = document.getElementById('categories');
 PAGES.forEach((p, i) => {
