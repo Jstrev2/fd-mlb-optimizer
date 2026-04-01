@@ -106,8 +106,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   let totalProps = 0;
 
   (async () => {
-    // Create a tab for scraping (we'll reuse it)
-    const tab = await chrome.tabs.create({ url: pages[0].url, active: false });
+    // Create a tab for scraping — must be active so DK fully renders
+    const tab = await chrome.tabs.create({ url: pages[0].url, active: true });
 
     for (let i = 0; i < pages.length; i++) {
       const page = pages[i];
@@ -131,8 +131,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         chrome.tabs.onUpdated.addListener(check);
       });
 
-      // Extra wait for DK's SPA to render
-      await new Promise(r => setTimeout(r, 3000));
+      // Wait for DK's SPA to render + scroll to load all lazy content
+      await new Promise(r => setTimeout(r, 4000));
+      
+      // Scroll down the page to trigger lazy loading
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          return new Promise(resolve => {
+            let scrolls = 0;
+            const interval = setInterval(() => {
+              window.scrollBy(0, 800);
+              scrolls++;
+              if (scrolls >= 15) { clearInterval(interval); window.scrollTo(0, 0); resolve(); }
+            }, 200);
+          });
+        },
+      });
+      
+      // Wait for content to settle after scrolling
+      await new Promise(r => setTimeout(r, 2000));
 
       // Inject and run scraper
       try {
