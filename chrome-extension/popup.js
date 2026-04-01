@@ -17,7 +17,7 @@ const catDiv = document.getElementById('categories');
 PAGES.forEach((p, i) => {
   const row = document.createElement('div');
   row.className = 'category';
-  row.innerHTML = `<span class="name">${p.name}</span><span class="result waiting" id="cat-${i}">—</span>`;
+  row.innerHTML = `<span class="name">${p.name}</span><span class="result waiting" id="cat-${i}">-</span>`;
   catDiv.appendChild(row);
 });
 
